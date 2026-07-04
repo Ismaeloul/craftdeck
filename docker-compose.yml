@@ -1,0 +1,10 @@
+# Prueba local con Docker (imita el despliegue en Umbrel)
+services:
+  craftdeck:
+    build: .
+    ports:
+      - "8449:8449"
+      - "25565-25574:25565-25574"
+    volumes:
+      - ./docker-data:/data
+    restart: unless-stopped

@@ -135,21 +135,21 @@ const NAV = [
     { id:'dashboard', label:'Dashboard', ic:'dashboard' },
     { id:'console', label:'Consola', ic:'terminal' },
     { id:'players', label:'Jugadores', ic:'users', badge:'navPlayerCount' },
-    { id:'stats', label:'Estadísticas', ic:'barChart' },
-    { id:'map', label:'Mapa en vivo', ic:'map' },
+    { id:'stats', label:'Estadísticas', ic:'barChart', demo:true },
+    { id:'map', label:'Mapa en vivo', ic:'map', demo:true },
   ]},
   { group:'CONTENIDO', items:[
-    { id:'mods', label:'Mods', ic:'package', badge:'navModCount', badgeWarn:true },
+    { id:'mods', label:'Mods', ic:'package', badge:'navModCount', badgeWarn:true, demo:true },
     { id:'world', label:'Mundo', ic:'globe' },
     { id:'files', label:'Archivos', ic:'fileCode' },
   ]},
   { group:'OPERACIONES', items:[
-    { id:'events', label:'Eventos', ic:'calendar' },
+    { id:'events', label:'Eventos', ic:'calendar', demo:true },
     { id:'backups', label:'Backups', ic:'database' },
-    { id:'crashes', label:'Diagnóstico', ic:'alert' },
+    { id:'crashes', label:'Diagnóstico', ic:'alert', demo:true },
   ]},
   { group:'SISTEMA', items:[
-    { id:'integrations', label:'Integraciones', ic:'share' },
+    { id:'integrations', label:'Integraciones', ic:'share', demo:true },
     { id:'audit', label:'Auditoría', ic:'list' },
   ]},
 ];
@@ -160,6 +160,7 @@ document.getElementById('navContainer').innerHTML = NAV.map(g =>
     titles[it.id] = it.label;
     return `<div class="nav-item${it.id==='dashboard'?' active':''}" data-section="${it.id}">
       ${icon(it.ic,16)} ${it.label}
+      ${it.demo?'<span class="nav-badge" style="background:rgba(255,255,255,.06);color:var(--muted)">demo</span>':''}
       ${it.badge?`<span class="nav-badge${it.badgeWarn?' warn':''}" id="${it.badge}"></span>`:''}
     </div>`;
   }).join('')
@@ -678,7 +679,7 @@ function renderBackups(){
       </div>
       <a class="btn small ghost" href="/api/servers/${curServerId()}/backups/${b.name}/download" title="Descargar">${icon('download',13)}</a>
       <button class="btn small" onclick="armAction(this, ()=>restoreBackupUI('${b.name}'))">Restaurar</button>
-      <button class="icon-btn red" onclick="armAction(this, ()=>deleteBackupUI('${b.name}'), '${icon('trash',13).replace(/'/g,"\\'")}')">${icon('trash',13)}</button>
+      <button class="icon-btn red" style="width:auto;padding:0 8px" onclick="armAction(this, ()=>deleteBackupUI('${b.name}'))">${icon('trash',13)}</button>
     </div>`).join('') || '<div class="empty">Sin backups todavía. Crea el primero con el botón de arriba.</div>';
 }
 /* doble click de confirmación: el primer click arma el botón, el segundo ejecuta */
