@@ -184,12 +184,21 @@
         <div class="search-bar">
           <div class="search-wrap">
             <i data-icon="search" data-size="15"></i>
-            <input type="text" id="modSearch" placeholder="Buscar en Modrinth… prueba: sodium, create, voice chat" oninput="onModSearchInput()">
+            <input type="text" id="modSearch" placeholder="Buscar en Modrinth… prueba: create, voice chat, waystones" oninput="onModSearchInput()">
           </div>
+          <select id="modSort" onchange="modFiltersChanged()" style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:0 13px;color:var(--text);font-size:13px;font-family:inherit;outline:none;">
+            <option value="relevance">Relevancia</option>
+            <option value="downloads">Más descargados</option>
+            <option value="follows">Más seguidos</option>
+            <option value="newest">Más nuevos</option>
+            <option value="updated">Recién actualizados</option>
+          </select>
           <button class="btn" onclick="checkUpdates()"><i data-icon="refresh" data-size="14"></i> Actualizaciones</button>
-          <button class="btn primary" onclick="downloadAllForFriends()"><i data-icon="download" data-size="14"></i> Pack para amigos</button>
+          <button class="btn primary" onclick="downloadFriendsZip()" title="Descarga un .zip con todos los mods activos del servidor"><i data-icon="download" data-size="14"></i> Pack .zip para amigos</button>
         </div>
+        <div id="modFilters" style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:16px;align-items:center;"></div>
         <div class="grid cols-2" id="modGrid"></div>
+        <div id="modPager" style="display:flex;gap:6px;align-items:center;justify-content:center;margin-top:18px;flex-wrap:wrap;"></div>
       </div>
 
       <div id="modtab-packs" style="display:none">

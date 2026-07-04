@@ -21,7 +21,8 @@ import {
 import {
   readProperties, writeProperties, listEditableFiles, readEditableFile, writeEditableFile,
 } from './properties.js';
-import { listMods, installMod, removeMod, toggleMod, checkModUpdates, updateMod } from './mods.js';
+import { listMods, installMod, removeMod, toggleMod, checkModUpdates, updateMod, enabledModJarPaths } from './mods.js';
+import { createZip } from './backups.js';
 import { playerStats } from './stats.js';
 import { listCrashes, crashText } from './crashes.js';
 import {
@@ -276,6 +277,20 @@ app.post('/api/servers/:id/mods/:filename/toggle', asyncRoute(async (req, res) =
   const { enabled } = req.body as { enabled?: boolean };
   await toggleMod(req.params.id!, req.params.filename!, !!enabled);
   res.json({ ok: true });
+}));
+
+app.get('/api/servers/:id/mods/pack', asyncRoute(async (req, res) => {
+  const meta = await getServer(req.params.id!);
+  if (!meta) { res.status(404).json({ error: 'Servidor no encontrado' }); return; }
+  const files = await enabledModJarPaths(meta.id);
+  if (!files.length) { res.status(400).json({ error: 'No hay mods activos que empaquetar' }); return; }
+  res.attachment(`craftdeck-${meta.name.replace(/[^\w-]+/g, '_')}-mods.zip`);
+  const archive = createZip();
+  archive.on('error', (err) => res.destroy(err));
+  archive.pipe(res);
+  for (const f of files) archive.file(f, { name: path.basename(f) });
+  await archive.finalize();
+  await audit('download', `Exportó el pack de mods (${files.length} jars)`, 'info');
 }));
 
 app.get('/api/servers/:id/mods/updates', asyncRoute(async (req, res) => {

@@ -7,9 +7,15 @@ interface Archive {
   on(event: 'error', cb: (err: Error) => void): void;
   pipe(dest: NodeJS.WritableStream): void;
   glob(pattern: string, opts: { cwd: string; ignore?: string[]; dot?: boolean }): void;
+  file(path: string, opts: { name: string }): void;
   finalize(): Promise<void>;
 }
 const archiver = createRequire(import.meta.url)('archiver') as (format: 'zip', opts?: { zlib?: { level?: number } }) => Archive;
+
+/** Zip streaming reutilizable (también lo usa el pack de mods). */
+export function createZip(): Archive {
+  return archiver('zip', { zlib: { level: 6 } });
+}
 import cron from 'node-cron';
 import { BACKUPS_DIR } from './paths.js';
 import { run } from './util.js';

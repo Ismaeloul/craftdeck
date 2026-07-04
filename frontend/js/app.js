@@ -166,7 +166,7 @@ function go(id){
   if(id==='backups') loadBackups();
   if(id==='stats') loadStats();
   if(id==='crashes') loadCrashes();
-  if(id==='mods'){ loadInstalledMods(); searchModrinth(document.getElementById('modSearch').value.trim()); }
+  if(id==='mods'){ renderModFilters(); loadInstalledMods(); searchModrinth(document.getElementById('modSearch').value.trim(), 0); }
   if(id==='players' && typeof refreshPlayerLists==='function') refreshPlayerLists();
 }
 document.querySelectorAll('.nav-item').forEach(item=>{
@@ -434,29 +434,90 @@ async function updateModUI(btn){
     await loadInstalledMods(); modUpdatesBadge();
   } catch(err){ toast('alert', err.message, 'err'); btn.disabled = false; btn.textContent = 'Actualizar'; }
 }
+/* ---- filtros y paginación ---- */
+const MODS_PER_PAGE = 20;
+const MOD_CATS = [
+  ['optimization','Optimización'], ['technology','Tecnología'], ['magic','Magia'],
+  ['adventure','Aventura'], ['worldgen','Mundo'], ['mobs','Mobs'],
+  ['food','Comida'], ['equipment','Equipamiento'], ['decoration','Decoración'],
+  ['storage','Almacenaje'], ['transportation','Transporte'], ['utility','Utilidades'],
+  ['game-mechanics','Mecánicas'], ['social','Social'],
+];
+state.modCats = new Set();
+state.modServerOnly = true;
+state.modShowLibs = false;
+state.modPage = 0;
+state.modTotal = 0;
+
+function renderModFilters(){
+  const chip = (label, active, onclick, title='') =>
+    `<button class="btn small${active?' primary':''}" style="border-radius:16px;" title="${title}" onclick="${onclick}">${label}</button>`;
+  document.getElementById('modFilters').innerHTML =
+    MOD_CATS.map(([slug,label]) => chip(label, state.modCats.has(slug), `toggleModCat('${slug}')`)).join('') +
+    `<span style="width:1px;height:20px;background:var(--border);margin:0 4px"></span>` +
+    chip('Solo server', state.modServerOnly, 'toggleModFlag("modServerOnly")', 'Oculta mods que solo funcionan en el cliente (shaders, minimapa…)') +
+    chip('Librerías', state.modShowLibs, 'toggleModFlag("modShowLibs")', 'Mostrar librerías (se instalan solas como dependencias)');
+}
+function toggleModCat(slug){
+  if(state.modCats.has(slug)) state.modCats.delete(slug); else state.modCats.add(slug);
+  modFiltersChanged();
+}
+function toggleModFlag(key){ state[key] = !state[key]; modFiltersChanged(); }
+function modFiltersChanged(){
+  renderModFilters();
+  searchModrinth(document.getElementById('modSearch').value.trim(), 0);
+}
+
 let searchTimer = null;
 function onModSearchInput(){
   clearTimeout(searchTimer);
-  searchTimer = setTimeout(()=>searchModrinth(document.getElementById('modSearch').value.trim()), 400);
+  searchTimer = setTimeout(()=>searchModrinth(document.getElementById('modSearch').value.trim(), 0), 400);
 }
-async function searchModrinth(query){
+
+async function searchModrinth(query, page=0){
   const grid = document.getElementById('modGrid');
   const loader = curLoader(), game = curGame();
-  if(!loader){ grid.innerHTML = ''; return; }
-  if(loader==='vanilla'){ grid.innerHTML = ''; return; }
+  if(!loader || loader==='vanilla'){ grid.innerHTML = ''; document.getElementById('modPager').innerHTML=''; return; }
   grid.innerHTML = '<div class="searching"><span class="spin"></span> Buscando en Modrinth…</div>';
-  const facets = encodeURIComponent(JSON.stringify([["project_type:mod"],[`categories:${loader}`],[`versions:${game}`]]));
-  const url = `${MODRINTH_API}/search?query=${encodeURIComponent(query)}&limit=12&index=${query?'relevance':'downloads'}&facets=${facets}`;
+  state.modPage = page;
+
+  const facets = [["project_type:mod"], [`categories:${loader}`], [`versions:${game}`]];
+  if(state.modCats.size) facets.push([...state.modCats].map(c=>`categories:${c}`));
+  if(state.modServerOnly) facets.push(["server_side:required","server_side:optional"]);
+  if(!state.modShowLibs) facets.push(["categories!=library"]);
+
+  let sort = document.getElementById('modSort').value;
+  if(sort==='relevance' && !query) sort = 'downloads';
+  const url = `${MODRINTH_API}/search?query=${encodeURIComponent(query)}&limit=${MODS_PER_PAGE}&offset=${page*MODS_PER_PAGE}`+
+    `&index=${sort}&facets=${encodeURIComponent(JSON.stringify(facets))}`;
   try {
     const res = await fetch(url);
     if(!res.ok) throw new Error('HTTP '+res.status);
     const data = await res.json();
     state.lastHits = data.hits;
+    state.modTotal = data.total_hits;
     renderModCards();
+    renderModPager();
   } catch(err){
     grid.innerHTML = `<div class="empty" style="grid-column:1/-1">No se pudo conectar con Modrinth. ¿Sin internet?<br><span style="font-family:var(--mono);font-size:11px">${esc(err.message)}</span></div>`;
     toast('alert','Sin conexión con la API de Modrinth','err');
   }
+}
+
+function renderModPager(){
+  const el = document.getElementById('modPager');
+  const pages = Math.ceil(state.modTotal / MODS_PER_PAGE);
+  if(pages <= 1){ el.innerHTML = state.modTotal ? `<span style="font-size:12px;color:var(--muted)">${fmtNum(state.modTotal)} mods</span>` : ''; return; }
+  const p = state.modPage;
+  const q = document.getElementById('modSearch').value.trim().replace(/'/g,'');
+  const btn = (label, page, disabled=false, active=false) =>
+    `<button class="btn small${active?' primary':''}" ${disabled?'disabled':''} onclick="searchModrinth('${esc(q)}', ${page}); window.scrollTo({top:0,behavior:'smooth'})">${label}</button>`;
+  const nums = [];
+  const from = Math.max(0, Math.min(p-2, pages-5));
+  for(let i=from; i<Math.min(from+5, pages); i++) nums.push(btn(i+1, i, false, i===p));
+  el.innerHTML =
+    btn('«', 0, p===0) + btn('‹', p-1, p===0) + nums.join('') + btn('›', p+1, p>=pages-1) + btn('»', pages-1, p>=pages-1) +
+    `<span style="font-size:12px;color:var(--muted);margin-left:10px">${fmtNum(state.modTotal)} mods · página ${p+1} de ${fmtNum(pages)}</span>`;
 }
 function renderModCards(){
   const grid = document.getElementById('modGrid');
@@ -536,21 +597,11 @@ async function downloadJar(i, btn){
   }
   btn.disabled = false; btn.innerHTML = original;
 }
-async function downloadAllForFriends(){
-  const slugs = (state.installedMods||[]).filter(m=>m.tracked && m.enabled && m.slug).map(m=>m.slug);
-  if(!slugs.length){ toast('alert','No tienes mods instalados','warn'); return; }
-  toast('download',`Descargando los .jar de tus ${slugs.length} mods… acepta las descargas múltiples si el navegador pregunta`,'info');
-  let ok = 0;
-  for(const slug of slugs){
-    try {
-      const file = await fetchJarFile(slug);
-      triggerDownload(file.url, file.filename);
-      ok++;
-      await new Promise(r=>setTimeout(r,900));
-    } catch(e){ /* sin versión compatible para esta MC: se omite */ }
-  }
-  toast('check',`Pack listo: ${ok} de ${slugs.length} .jar descargados. Tus amigos solo tienen que copiarlos a su carpeta mods.`,'ok');
-  addAudit('download',`Exportó el pack para amigos (${ok} mods)`,'ok');
+function downloadFriendsZip(){
+  const enabled = (state.installedMods||[]).filter(m=>m.enabled);
+  if(!enabled.length){ toast('alert','No hay mods activos que empaquetar','warn'); return; }
+  triggerDownload(`/api/servers/${curServerId()}/mods/pack`, '');
+  toast('check',`Descargando el .zip con ${enabled.length} mods. Tus amigos lo descomprimen en su carpeta mods y listo.`,'ok');
 }
 function switchModTab(tab){
   state.modTab = tab;

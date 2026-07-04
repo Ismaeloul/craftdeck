@@ -126,6 +126,12 @@ export async function toggleMod(id: string, filename: string, enabled: boolean):
   else await rename(base, base + '.disabled');
 }
 
+/** Rutas absolutas de los jars activos, para el pack de amigos. */
+export async function enabledModJarPaths(id: string): Promise<string[]> {
+  const mods = await listMods(id);
+  return mods.filter((m) => m.enabled).map((m) => path.join(modsDir(id), m.filename));
+}
+
 export interface ModUpdate { filename: string; name: string; current: string; latest: string }
 
 export async function checkModUpdates(id: string): Promise<ModUpdate[]> {
