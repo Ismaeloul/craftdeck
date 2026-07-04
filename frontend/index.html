@@ -206,30 +206,30 @@
       <div class="section-head">
         <h2>Mundo</h2>
         <p>Edición visual de server.properties · se aplica al reiniciar</p>
-        <div class="right"><button class="btn primary" onclick="toast('check','Configuración guardada. Reinicia para aplicar.','ok'); addAudit('save','Modificó server.properties','info')"><i data-icon="save" data-size="14"></i> Guardar</button></div>
+        <div class="right"><button class="btn primary" onclick="saveWorld()"><i data-icon="save" data-size="14"></i> Guardar</button></div>
       </div>
       <div class="grid cols-2">
         <div class="card">
           <h3><i data-icon="settings" data-size="15"></i> General</h3>
           <div class="form-grid">
-            <div class="field"><label>MOTD</label><input type="text" value="Servidor de Isma — powered by Umbrel"></div>
-            <div class="field"><label>Semilla</label><input type="text" value="-4172144997902289642"></div>
+            <div class="field"><label>MOTD</label><input type="text" id="wMotd"></div>
+            <div class="field"><label>Semilla <span style="color:var(--muted);font-weight:400">(solo mundos nuevos)</span></label><input type="text" id="wSeed"></div>
             <div class="field"><label>Dificultad</label>
-              <select><option>Pacífico</option><option>Fácil</option><option selected>Normal</option><option>Difícil</option></select>
+              <select id="wDifficulty"><option value="peaceful">Pacífico</option><option value="easy">Fácil</option><option value="normal" selected>Normal</option><option value="hard">Difícil</option></select>
             </div>
             <div class="field"><label>Modo de juego</label>
-              <select><option selected>Supervivencia</option><option>Creativo</option><option>Aventura</option><option>Espectador</option></select>
+              <select id="wGamemode"><option value="survival" selected>Supervivencia</option><option value="creative">Creativo</option><option value="adventure">Aventura</option><option value="spectator">Espectador</option></select>
             </div>
           </div>
           <div style="margin-top:16px;">
             <div class="field"><label>Máximo de jugadores · <span class="slider-val" id="maxPlayersVal">20</span></label>
-              <div class="slider-row"><input type="range" min="2" max="100" value="20" oninput="maxPlayersVal.textContent=this.value"></div>
+              <div class="slider-row"><input type="range" id="wMaxPlayers" min="2" max="100" value="20" oninput="maxPlayersVal.textContent=this.value"></div>
             </div>
             <div class="field" style="margin-top:13px;"><label>Distancia de renderizado · <span class="slider-val" id="viewDistVal">10</span> chunks</label>
-              <div class="slider-row"><input type="range" min="3" max="32" value="10" oninput="viewDistVal.textContent=this.value"></div>
+              <div class="slider-row"><input type="range" id="wViewDist" min="3" max="32" value="10" oninput="viewDistVal.textContent=this.value"></div>
             </div>
             <div class="field" style="margin-top:13px;"><label>Protección del spawn · <span class="slider-val" id="spawnProtVal">16</span> bloques</label>
-              <div class="slider-row"><input type="range" min="0" max="64" value="16" oninput="spawnProtVal.textContent=this.value"></div>
+              <div class="slider-row"><input type="range" id="wSpawnProt" min="0" max="64" value="16" oninput="spawnProtVal.textContent=this.value"></div>
             </div>
           </div>
         </div>
@@ -372,6 +372,7 @@
 <script src="js/api.js"></script>
 <script src="js/app.js"></script>
 <script src="js/live.js"></script>
+<script src="js/world.js"></script>
 <script src="js/wizard.js"></script>
 </body>
 </html>

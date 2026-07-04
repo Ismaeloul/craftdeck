@@ -59,6 +59,10 @@ async function onServerSwitched(){
     document.getElementById('statRamMax').textContent = ` / ${(s.memoryMb/1024).toFixed(0)} GB`;
   } catch { /* ignorar */ }
   refreshPlayerLists();
+  loadAudit();
+  const visible = document.querySelector('.section.visible')?.id;
+  if(visible==='sec-world') loadWorld();
+  if(visible==='sec-files') loadFiles();
 }
 
 onWS((msg)=>{

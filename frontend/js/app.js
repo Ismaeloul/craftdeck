@@ -173,6 +173,10 @@ function go(id){
   el.classList.add('visible');
   document.getElementById('pageTitle').textContent = titles[id];
   if(id==='map') requestAnimationFrame(drawMapBase);
+  if(id==='world' && typeof loadWorld==='function') loadWorld();
+  if(id==='files') loadFiles();
+  if(id==='audit') loadAudit();
+  if(id==='players' && typeof refreshPlayerLists==='function') refreshPlayerLists();
 }
 document.querySelectorAll('.nav-item').forEach(item=>{
   item.addEventListener('click', ()=>go(item.dataset.section));
@@ -233,11 +237,28 @@ function renderAudit(){
     </div>`;
   }).join('') || '<div class="empty">Sin actividad registrada</div>';
 }
-[['terminal','Ejecutó /whitelist add Luna_Craft','info','4 jul, 09:12'],
- ['package','Instaló Lithium 0.14.3 (con backup previo)','ok','2 jul, 18:22'],
- ['ban','Baneó a Griefer_99 — razón: destruir la base de Luna','err','30 jun, 22:03'],
- ['save','Modificó server.properties (view-distance 12 → 10)','info','29 jun, 17:40'],
-].forEach(a=>addAudit(a[0],a[1],a[2],a[3]));
+async function loadAudit(){
+  try {
+    const rows = await API.get('/audit');
+    state.audit = rows.map(r=>({
+      ic: ICONS[r.action] ? r.action : 'list',
+      text: r.detail,
+      type: r.level,
+      when: new Date(r.at).toLocaleString('es-ES',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}),
+    }));
+    renderAudit();
+    renderActivity();
+  } catch { /* backend no disponible */ }
+}
+function renderActivity(){
+  const colors = { info:'var(--info)', warn:'var(--warn)', err:'var(--danger)', ok:'var(--accent)' };
+  document.getElementById('activityFeed').innerHTML = state.audit.slice(0,5).map(a=>`
+    <div style="display:flex;align-items:center;gap:11px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:12.5px;">
+      <span style="color:${colors[a.type]||'var(--muted2)'};display:flex">${icon(a.ic,14)}</span>
+      <span style="flex:1">${a.text}</span>
+      <span style="color:var(--muted);font-size:11.5px">${a.when}</span>
+    </div>`).join('') || '<div class="empty" style="padding:16px">Sin actividad todavía</div>';
+}
 
 /* =================== SERVER LIFECYCLE =================== */
 const statusDot = document.getElementById('statusDot');
@@ -544,40 +565,63 @@ function installPack(btn, name, mods){
 
 /* =================== GAME RULES =================== */
 const RULES = [
-  ['PvP','Permite combate entre jugadores',true],
-  ['Whitelist','Solo entran jugadores aprobados',true],
-  ['Modo hardcore','Una vida. Sin respawn.',false],
-  ['Generar estructuras','Aldeas, templos, fortalezas',true],
-  ['Ciclo día / noche','doDaylightCycle',true],
-  ['Keep inventory','Conserva el inventario al morir',false],
-  ['Mobs hostiles','Spawneo de criaturas enemigas',true],
+  { key:'pvp', type:'prop', label:'PvP', sub:'Permite combate entre jugadores', def:true },
+  { key:'white-list', type:'prop', label:'Whitelist', sub:'Solo entran jugadores aprobados', def:false },
+  { key:'hardcore', type:'prop', label:'Modo hardcore', sub:'Una vida. Sin respawn.', def:false },
+  { key:'generate-structures', type:'prop', label:'Generar estructuras', sub:'Aldeas, templos, fortalezas', def:true },
+  { key:'spawn-monsters', type:'prop', label:'Mobs hostiles', sub:'Spawneo de criaturas enemigas', def:true },
+  { key:'doDaylightCycle', type:'gamerule', label:'Ciclo día / noche', sub:'Se aplica al momento · requiere server encendido', def:true },
+  { key:'keepInventory', type:'gamerule', label:'Keep inventory', sub:'Se aplica al momento · requiere server encendido', def:false },
 ];
-document.getElementById('gameRules').innerHTML = RULES.map(r=>`
-  <div class="toggle-row"><div><div class="t-label">${r[0]}</div><div class="t-sub">${r[1]}</div></div>
-  <label class="switch"><input type="checkbox" ${r[2]?'checked':''}><span class="track"></span><span class="thumb"></span></label></div>`).join('');
+function renderRules(props){
+  document.getElementById('gameRules').innerHTML = RULES.map(r=>{
+    const on = r.type==='prop' && props && props[r.key]!==undefined ? props[r.key]==='true' : r.def;
+    return `<div class="toggle-row"><div><div class="t-label">${r.label}</div><div class="t-sub">${r.sub}</div></div>
+    <label class="switch"><input type="checkbox" data-rule="${r.key}" data-ruletype="${r.type}" ${on?'checked':''} onchange="ruleChanged(this)"><span class="track"></span><span class="thumb"></span></label></div>`;
+  }).join('');
+}
+renderRules(null);
 
 /* =================== FILES =================== */
+function fileLang(f){
+  const ext = f.split('.').pop().toUpperCase();
+  return { YML:'YAML', YAML:'YAML', PROPERTIES:'PROPERTIES', JSON:'JSON', TOML:'TOML', TXT:'TEXTO', CONF:'CONF', CFG:'CFG' }[ext] || ext;
+}
 function renderFileTree(){
   const roots = [], configs = [];
-  Object.keys(state.files).forEach(f=> (f.startsWith('config/')?configs:roots).push(f));
-  const item = f=>`<div class="file-item${state.currentFile===f?' active':''}" onclick="openFile('${f}')">${icon('fileCode',13)} ${f.replace('config/','')}</div>`;
+  (state.fileList||[]).forEach(f=> (f.includes('/')?configs:roots).push(f));
+  const item = f=>`<div class="file-item${state.currentFile===f?' active':''}" onclick="openFile('${f}')">${icon('fileCode',13)} ${f.replace(/^[^/]+\//,'')}</div>`;
   document.getElementById('fileTree').innerHTML =
-    `<div class="file-folder">RAÍZ DEL SERVIDOR</div>` + roots.map(item).join('') +
-    `<div class="file-folder">CONFIG /</div>` + configs.map(item).join('');
+    `<div class="file-folder">RAÍZ DEL SERVIDOR</div>` + (roots.map(item).join('') || '<div class="empty" style="padding:10px;font-size:11px">vacío</div>') +
+    (configs.length ? `<div class="file-folder">CONFIG /</div>` + configs.map(item).join('') : '');
 }
-function openFile(f){
+async function loadFiles(){
+  const id = curServerId(); if(!id) return;
+  try {
+    const { files } = await API.get(`/servers/${id}/files`);
+    state.fileList = files;
+    renderFileTree();
+    const first = files.includes('server.properties') ? 'server.properties' : files[0];
+    if(first) openFile(first);
+  } catch(err){ console.warn('loadFiles', err); }
+}
+async function openFile(f){
   state.currentFile = f;
   document.getElementById('editorFile').textContent = f;
-  document.getElementById('editorLang').textContent = state.files[f].lang;
-  document.getElementById('editorArea').value = state.files[f].content;
+  document.getElementById('editorLang').textContent = fileLang(f);
   renderFileTree();
+  try {
+    const { content } = await API.get(`/servers/${curServerId()}/file?path=${encodeURIComponent(f)}`);
+    document.getElementById('editorArea').value = content;
+  } catch(err){ document.getElementById('editorArea').value = ''; toast('alert', err.message, 'err'); }
 }
-function saveFile(){
-  state.files[state.currentFile].content = document.getElementById('editorArea').value;
-  toast('save',`${state.currentFile} guardado`,'ok');
-  addAudit('save','Editó '+state.currentFile,'info');
+async function saveFile(){
+  if(!state.currentFile) return;
+  try {
+    await API.put(`/servers/${curServerId()}/file`, { path: state.currentFile, content: document.getElementById('editorArea').value });
+    toast('save',`${state.currentFile} guardado`,'ok');
+  } catch(err){ toast('alert', err.message, 'err'); }
 }
-renderFileTree(); openFile('server.properties');
 
 /* =================== EVENTS =================== */
 function renderEvents(){
@@ -681,19 +725,6 @@ function openCrash(id){
 renderCrashes(); openCrash(0);
 
 /* =================== ACTIVITY FEED =================== */
-const activity = [
-  ['users','var(--accent)','<b>Luna_Craft</b> se conectó','hace 12 min'],
-  ['database','var(--info)','Backup automático completado (1.21 GB)','04:00'],
-  ['package','var(--warn)','<b>Lithium</b> tiene actualización disponible','hace 3 h'],
-  ['alert','var(--danger)','Crash analizado: culpable Phosphor','2 jul'],
-  ['refresh','var(--muted2)','Reinicio programado ejecutado','dom 06:00'],
-];
-document.getElementById('activityFeed').innerHTML = activity.map(a=>`
-  <div style="display:flex;align-items:center;gap:11px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:12.5px;">
-    <span style="color:${a[1]};display:flex">${icon(a[0],14)}</span>
-    <span style="flex:1">${a[2]}</span>
-    <span style="color:var(--muted);font-size:11.5px">${a[3]}</span>
-  </div>`).join('');
 
 /* =================== CHARTS =================== */
 function drawChart(canvas,data,opts){
@@ -843,4 +874,4 @@ searchModrinth('');
 renderPacks();
 modUpdatesBadge();
 tickCharts();
-setTimeout(()=>toast('umbrella','Bienvenido a CraftDeck — demo completa del panel','ok'),700);
+setTimeout(()=>toast('umbrella','Bienvenido a CraftDeck','ok'),700);

@@ -11,6 +11,7 @@ const API = {
   },
   get(path) { return this._req(path); },
   post(path, body) { return this._req(path, { method: 'POST', body: JSON.stringify(body) }); },
+  put(path, body) { return this._req(path, { method: 'PUT', body: JSON.stringify(body) }); },
   del(path) { return this._req(path, { method: 'DELETE' }); },
 };
 

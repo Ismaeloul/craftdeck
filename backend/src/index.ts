@@ -14,6 +14,9 @@ import {
 } from './instance.js';
 import { playerLists, playerAction } from './players.js';
 import {
+  readProperties, writeProperties, listEditableFiles, readEditableFile, writeEditableFile,
+} from './properties.js';
+import {
   Loader, ServerMeta, listServers, getServer, addServer, removeServer,
   serverDir, nextFreePort, audit, readAudit,
 } from './store.js';
@@ -151,6 +154,42 @@ app.delete('/api/servers/:id', asyncRoute(async (req, res) => {
   await rm(serverDir(meta.id), { recursive: true, force: true });
   await audit('trash', `Eliminó el servidor ${meta.name}`, 'warn');
   broadcast('servers', {});
+  res.json({ ok: true });
+}));
+
+// ---- server.properties ----
+app.get('/api/servers/:id/properties', asyncRoute(async (req, res) => {
+  res.json(await readProperties(req.params.id!));
+}));
+
+app.put('/api/servers/:id/properties', asyncRoute(async (req, res) => {
+  const patch = req.body as Record<string, unknown>;
+  if (!patch || typeof patch !== 'object') { res.status(400).json({ error: 'Body inválido' }); return; }
+  const clean: Record<string, string> = {};
+  for (const [k, v] of Object.entries(patch)) {
+    if (!/^[a-z0-9.-]+$/i.test(k) || /[\r\n]/.test(String(v))) { res.status(400).json({ error: `Clave o valor inválido: ${k}` }); return; }
+    clean[k] = String(v);
+  }
+  await writeProperties(req.params.id!, clean);
+  await audit('save', 'Modificó server.properties', 'info');
+  res.json({ ok: true });
+}));
+
+// ---- editor de archivos ----
+app.get('/api/servers/:id/files', asyncRoute(async (req, res) => {
+  res.json({ files: await listEditableFiles(req.params.id!) });
+}));
+
+app.get('/api/servers/:id/file', asyncRoute(async (req, res) => {
+  const rel = String(req.query.path ?? '');
+  res.json({ path: rel, content: await readEditableFile(req.params.id!, rel) });
+}));
+
+app.put('/api/servers/:id/file', asyncRoute(async (req, res) => {
+  const { path: rel, content } = req.body as { path?: string; content?: string };
+  if (!rel || typeof content !== 'string') { res.status(400).json({ error: 'Faltan path o content' }); return; }
+  await writeEditableFile(req.params.id!, rel, content);
+  await audit('save', `Editó ${rel}`, 'info');
   res.json({ ok: true });
 }));
 
