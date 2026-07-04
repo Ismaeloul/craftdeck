@@ -23,11 +23,15 @@ type Broadcast = (type: string, payload: unknown) => void;
 let broadcastFn: Broadcast = () => {};
 export function setPlayitBroadcast(fn: Broadcast): void { broadcastFn = fn; }
 
+// Fijado al agente clásico 0.15: el 1.x es un demonio (playitd) que ya no imprime
+// la URL de claim por sí solo — espera a un frontend por IPC que aquí no existe.
+const PLAYIT_VERSION = '0.15.26';
+
 function binaryInfo(): { url: string; file: string } {
-  const base = 'https://github.com/playit-cloud/playit-agent/releases/latest/download';
-  if (process.platform === 'win32') return { url: `${base}/playit-windows-x86_64-signed.exe`, file: 'playit.exe' };
+  const base = `https://github.com/playit-cloud/playit-agent/releases/download/v${PLAYIT_VERSION}`;
+  if (process.platform === 'win32') return { url: `${base}/playit-windows-x86_64-signed.exe`, file: `playit-${PLAYIT_VERSION}.exe` };
   const arch = process.arch === 'arm64' ? 'aarch64' : 'amd64';
-  return { url: `${base}/playit-linux-${arch}`, file: 'playit' };
+  return { url: `${base}/playit-linux-${arch}`, file: `playit-${PLAYIT_VERSION}` };
 }
 
 async function ensureBinary(): Promise<string> {
@@ -49,12 +53,13 @@ export async function startPlayit(): Promise<void> {
   const bin = await ensureBinary();
   state.claimUrl = null;
   state.lastLines = [];
-  proc = spawn(bin, ['--secret-path', path.join(PLAYIT_DIR, 'playit.toml')], {
+  proc = spawn(bin, ['--secret_path', path.join(PLAYIT_DIR, 'playit.toml')], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   state.running = true;
   const onData = (chunk: Buffer) => {
-    for (const line of chunk.toString().split(/\r?\n/)) {
+    for (const raw of chunk.toString().split(/\r?\n/)) {
+      const line = raw.replace(/\x1b\[[0-9;]*[A-Za-z]/g, ''); // fuera códigos ANSI de color
       if (!line.trim()) continue;
       state.lastLines.push(line);
       if (state.lastLines.length > 60) state.lastLines.shift();
