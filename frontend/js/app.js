@@ -62,13 +62,8 @@ function hydrateIcons(root=document){
 
 /* =================== STATE =================== */
 const state = {
-  online: true,
-  players: [
-    { name:'Isma_Dev', op:true, afk:false, time:'2h 14m', ping:12 },
-    { name:'xX_Dragon_Xx', op:false, afk:false, time:'1h 03m', ping:34 },
-    { name:'Creeper_Hunter', op:false, afk:true, time:'44m', ping:58 },
-    { name:'Luna_Craft', op:false, afk:false, time:'12m', ping:21 },
-  ],
+  online: false,
+  players: [],
   mods: [
     { id:'sodium', name:'Sodium', ic:'zap', color:'var(--accent)', bg:'var(--accent-dim)', desc:'Optimización radical del renderizado. Duplica o triplica los FPS.', dl:'38.2M', ver:'0.6.5', installed:true, enabled:true, update:false, deps:[] },
     { id:'lithium', name:'Lithium', ic:'cpu', color:'var(--info)', bg:'var(--info-dim)', desc:'Optimiza ticks, IA y física del servidor sin cambiar el gameplay.', dl:'21.7M', ver:'0.14.3', installed:true, enabled:true, update:true, deps:[] },
@@ -121,13 +116,9 @@ const state = {
     'config/lithium.properties': { lang:'PROPERTIES', content:'# Lithium config\nmixin.ai.pathing=true\nmixin.alloc=true\nmixin.block.hopper=true\nmixin.entity.collisions=true\nmixin.world.tick_scheduler=true' },
     'config/craftdeck.yml': { lang:'YAML', content:'# CraftDeck panel config\nrcon:\n  host: 127.0.0.1\n  port: 25575\nbackups:\n  keep: 7\n  schedule: "0 4 * * *"\nnotifications:\n  discord: true\n  on_crash: true\n  on_join: false' },
   },
-  servers: [
-    { name:'Survival', sub:'Fabric 1.21.1 · :25565', status:'online' },
-    { name:'Creativo', sub:'Paper 1.21.1 · :25566', status:'online' },
-    { name:'Test Mods', sub:'Fabric 1.21.1 · :25567', status:'offline' },
-  ],
+  servers: [],
   currentServer: 0,
-  uptimeSec: 2*3600+14*60+36,
+  uptimeSec: 0,
   tpsHistory: [], cpuHistory: [], ramHistory: [],
   autoscroll: true,
   currentFile: 'server.properties',
@@ -137,11 +128,6 @@ const state = {
   disabled: {},
   lastHits: [],
 };
-for(let i=0;i<90;i++){
-  state.tpsHistory.push(19.4+Math.random()*0.6);
-  state.cpuHistory.push(25+Math.random()*20);
-  state.ramHistory.push(50+Math.random()*10);
-}
 
 /* =================== NAV =================== */
 const NAV = [
@@ -209,11 +195,11 @@ document.addEventListener('click', ()=>document.getElementById('ssMenu').classLi
 function pickServer(i){
   state.currentServer = i;
   const s = state.servers[i];
+  if(!s) return;
   document.getElementById('ssName').textContent = s.name;
   document.getElementById('ssSub').textContent = s.sub;
   document.getElementById('ssDot').style.background = s.status==='online'?'var(--accent)':'var(--danger)';
-  setStatus(s.status==='online'?'online':'offline');
-  toast('server',`Cambiado al servidor «${s.name}»`,'ok');
+  if(typeof onServerSwitched==='function') onServerSwitched();
 }
 renderServerMenu();
 
@@ -269,28 +255,18 @@ function setStatus(mode){
   if(mode==='offline'){ statusText.textContent='Detenido'; state.online=false; btnStart.disabled=false; btnStop.disabled=true; btnRestart.disabled=true; }
   if(mode==='starting'){ statusText.textContent='Arrancando…'; btnStart.disabled=true; btnStop.disabled=true; btnRestart.disabled=true; }
 }
-btnStop.onclick = ()=>{
-  setStatus('offline');
-  logLine('warn','[Server] Deteniendo… guardando 9 chunks');
-  logLine('info','[Server] Servidor detenido correctamente');
-  toast('stop','Servidor detenido','warn');
-  addAudit('stop','Detuvo el servidor','warn');
+btnStop.onclick = async ()=>{
+  try { btnStop.disabled = true; await API.post(`/servers/${curServerId()}/stop`); toast('stop','Servidor detenido','warn'); }
+  catch(err){ toast('alert', err.message, 'err'); btnStop.disabled = false; }
 };
-btnStart.onclick = ()=>{
-  setStatus('starting');
-  logLine('info','[Server] Iniciando servidor Fabric 1.21.1…');
-  toast('play','Arrancando servidor…','info');
-  setTimeout(()=>logLine('info','[Server] Cargando 47 mods… OK'),900);
-  setTimeout(()=>logLine('info','[Server] Preparando nivel "world"…'),1700);
-  setTimeout(()=>{
-    setStatus('online');
-    logLine('info','[Server] Listo (2.412s). Escuchando en *:25565');
-    toast('check','Servidor en línea','ok');
-    addAudit('play','Inició el servidor','ok');
-    state.uptimeSec = 0;
-  },2600);
+btnStart.onclick = async ()=>{
+  try { btnStart.disabled = true; toast('play','Arrancando servidor…','info'); await API.post(`/servers/${curServerId()}/start`); }
+  catch(err){ toast('alert', err.message, 'err'); btnStart.disabled = false; }
 };
-btnRestart.onclick = ()=>{ btnStop.onclick(); setTimeout(()=>btnStart.onclick(),1100); };
+btnRestart.onclick = async ()=>{
+  try { btnRestart.disabled = true; toast('refresh','Reiniciando servidor…','info'); await API.post(`/servers/${curServerId()}/restart`); }
+  catch(err){ toast('alert', err.message, 'err'); btnRestart.disabled = false; }
+};
 
 /* =================== CONSOLE =================== */
 const consoleBody = document.getElementById('consoleBody');
@@ -312,41 +288,13 @@ function toggleAutoscroll(){
 }
 const cmdInput = document.getElementById('cmdInput');
 cmdInput.addEventListener('keydown', e=>{ if(e.key==='Enter') sendCommand(); });
-function sendCommand(){
+async function sendCommand(){
   const cmd = cmdInput.value.trim();
   if(!cmd) return;
-  logLine('cmd','&gt; '+cmd);
-  addAudit('terminal','Ejecutó /'+cmd,'info');
   cmdInput.value='';
-  setTimeout(()=>{
-    if(cmd.startsWith('say ')) logLine('info',`[Server] &lt;Server&gt; ${cmd.slice(4)}`);
-    else if(cmd.includes('time set day')){ logLine('info','[Server] Set the time to 1000'); toast('check','Amaneció en el servidor','ok'); }
-    else if(cmd.includes('weather')) logLine('info','[Server] Set the weather to clear');
-    else if(cmd.startsWith('tp')) logLine('info','[Server] Teleported Isma_Dev to Luna_Craft');
-    else if(cmd==='list') logLine('info',`[Server] There are ${state.players.length} of a max of 20 players online: ${state.players.map(p=>p.name).join(', ')}`);
-    else logLine('info',`[Server] Ejecutado: /${cmd}`);
-  },350);
+  try { await API.post(`/servers/${curServerId()}/command`, { command: cmd }); }
+  catch(err){ toast('alert', err.message, 'err'); }
 }
-[['info','[Server] Starting minecraft server version 1.21.1'],
- ['info','[Server] Loading 47 mods (fabric-api, sodium, lithium…)'],
- ['info','[Server] Preparing level "world"'],
- ['info','[Server] Done (2.412s)! For help, type "help"'],
- ['info','[Server] Isma_Dev joined the game'],
- ['info','[Server] xX_Dragon_Xx joined the game'],
- ['warn','[Server] Can\'t keep up! Running 52ms behind'],
- ['info','[Server] Creeper_Hunter joined the game'],
- ['info','[Server] Luna_Craft joined the game'],
-].forEach((l,i)=>setTimeout(()=>logLine(l[0],l[1]), i*110));
-const chatter = [
-  ['info','[Server] &lt;Luna_Craft&gt; alguien tiene diamantes de sobra?'],
-  ['info','[Server] &lt;xX_Dragon_Xx&gt; voy al nether, deseadme suerte'],
-  ['info','[Server] Creeper_Hunter fell from a high place'],
-  ['warn','[Server] Can\'t keep up! Running 38ms behind'],
-  ['info','[Server] &lt;Isma_Dev&gt; jajaja F'],
-  ['info','[Server] Saved the game'],
-  ['info','[Server] &lt;Luna_Craft&gt; gracias!!'],
-];
-setInterval(()=>{ if(state.online){ const l=chatter[Math.floor(Math.random()*chatter.length)]; logLine(l[0],l[1]); } },6500);
 
 /* =================== PLAYERS =================== */
 function renderPlayers(){
@@ -403,7 +351,7 @@ document.getElementById('statsBody').innerHTML = statRows.map((r,i)=>`
   </tr>`).join('');
 
 /* =================== MODS — API REAL DE MODRINTH =================== */
-const API = 'https://api.modrinth.com/v2';
+const MODRINTH_API = 'https://api.modrinth.com/v2';
 const MC_VERSION = '1.21.1';
 const CONFLICTS = { phosphor: 'lithium' };
 function esc(s){ return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -422,7 +370,7 @@ async function searchModrinth(query){
   const grid = document.getElementById('modGrid');
   grid.innerHTML = '<div class="searching"><span class="spin"></span> Buscando en Modrinth…</div>';
   const facets = encodeURIComponent(JSON.stringify([["project_type:mod"],["categories:fabric"],[`versions:${MC_VERSION}`]]));
-  const url = `${API}/search?query=${encodeURIComponent(query)}&limit=12&index=${query?'relevance':'downloads'}&facets=${facets}`;
+  const url = `${MODRINTH_API}/search?query=${encodeURIComponent(query)}&limit=12&index=${query?'relevance':'downloads'}&facets=${facets}`;
   try {
     const res = await fetch(url);
     if(!res.ok) throw new Error('HTTP '+res.status);
@@ -511,7 +459,7 @@ function toggleMod(i){
 /* ---- descarga real de .jar desde el CDN de Modrinth ---- */
 async function fetchJarFile(slug){
   const params = `loaders=${encodeURIComponent('["fabric"]')}&game_versions=${encodeURIComponent(`["${MC_VERSION}"]`)}`;
-  const res = await fetch(`${API}/project/${slug}/version?${params}`);
+  const res = await fetch(`${MODRINTH_API}/project/${slug}/version?${params}`);
   if(!res.ok) throw new Error('HTTP '+res.status);
   const versions = await res.json();
   if(!versions.length) throw new Error('sin versión compatible');
@@ -776,23 +724,14 @@ function drawDualChart(canvas,a,b){
   ctx.fillStyle='#a78bfa'; ctx.fillText('RAM',40,13);
 }
 function tickCharts(){
-  if(state.online){
-    state.tpsHistory.push(Math.min(20,19.2+Math.random()*0.9));
-    state.cpuHistory.push(Math.max(5,Math.min(95,state.cpuHistory.at(-1)+(Math.random()-0.5)*12)));
-    state.ramHistory.push(Math.max(30,Math.min(90,state.ramHistory.at(-1)+(Math.random()-0.5)*4)));
-  } else { state.tpsHistory.push(0); state.cpuHistory.push(2); state.ramHistory.push(5); }
+  // el historial lo alimentan los eventos 'metrics' del WebSocket (live.js)
   [state.tpsHistory,state.cpuHistory,state.ramHistory].forEach(a=>{ if(a.length>90)a.shift(); });
-  drawChart(document.getElementById('tpsChart'),state.tpsHistory,{min:0,max:20.5,color:'#34d399',fill:'rgba(52,211,153,.18)'});
-  drawDualChart(document.getElementById('cpuChart'),state.cpuHistory,state.ramHistory);
-  const tps = state.tpsHistory.at(-1);
+  const pad = a => a.length>1 ? a : [0,0];
+  drawChart(document.getElementById('tpsChart'),pad(state.tpsHistory),{min:0,max:20.5,color:'#34d399',fill:'rgba(52,211,153,.18)'});
+  drawDualChart(document.getElementById('cpuChart'),pad(state.cpuHistory),pad(state.ramHistory));
   const tpsEl = document.getElementById('statTps');
-  tpsEl.textContent = tps.toFixed(1);
-  tpsEl.style.color = tps>18?'var(--accent)':tps>14?'var(--warn)':'var(--danger)';
-  const ramGb = state.online?(state.ramHistory.at(-1)/100*6):0;
-  document.getElementById('statRam').textContent = ramGb.toFixed(1);
-  const ramBar = document.getElementById('ramBar');
-  ramBar.style.width = (ramGb/6*100)+'%';
-  ramBar.className = 'progress-fill'+(ramGb/6>0.85?' warn':'');
+  tpsEl.textContent = state.online ? '20' : '—';
+  tpsEl.style.color = state.online ? 'var(--accent)' : 'var(--muted)';
 }
 setInterval(tickCharts,1500);
 

@@ -10,6 +10,9 @@ import { listForgeVersions } from './catalog/forge.js';
 import { listNeoForgeVersions } from './catalog/neoforge.js';
 import { provisionServer } from './provision.js';
 import {
+  setBroadcast, runtimeOf, consoleOf, startServer, stopServer, sendCommand, stopAll,
+} from './instance.js';
+import {
   Loader, ServerMeta, listServers, getServer, addServer, removeServer,
   serverDir, nextFreePort, audit, readAudit,
 } from './store.js';
@@ -63,13 +66,44 @@ app.get('/api/catalog/:loader', asyncRoute(async (req, res) => {
 
 // ---- servidores ----
 app.get('/api/servers', asyncRoute(async (_req, res) => {
-  res.json(await listServers());
+  const all = await listServers();
+  res.json(all.map((s) => ({ ...s, runtime: runtimeOf(s.id) })));
 }));
 
 app.get('/api/servers/:id', asyncRoute(async (req, res) => {
   const meta = await getServer(req.params.id!);
   if (!meta) { res.status(404).json({ error: 'Servidor no encontrado' }); return; }
-  res.json(meta);
+  res.json({ ...meta, runtime: runtimeOf(meta.id) });
+}));
+
+// ---- ciclo de vida ----
+app.post('/api/servers/:id/start', asyncRoute(async (req, res) => {
+  await startServer(req.params.id!);
+  res.json({ ok: true });
+}));
+
+app.post('/api/servers/:id/stop', asyncRoute(async (req, res) => {
+  await stopServer(req.params.id!);
+  await audit('stop', 'Detuvo el servidor', 'warn');
+  res.json({ ok: true });
+}));
+
+app.post('/api/servers/:id/restart', asyncRoute(async (req, res) => {
+  await stopServer(req.params.id!);
+  await startServer(req.params.id!);
+  res.json({ ok: true });
+}));
+
+app.post('/api/servers/:id/command', asyncRoute(async (req, res) => {
+  const { command } = req.body as { command?: string };
+  if (!command?.trim()) { res.status(400).json({ error: 'Comando vacío' }); return; }
+  sendCommand(req.params.id!, command.trim());
+  await audit('terminal', `Ejecutó /${command.trim()}`, 'info');
+  res.json({ ok: true });
+}));
+
+app.get('/api/servers/:id/console', asyncRoute(async (req, res) => {
+  res.json({ lines: consoleOf(req.params.id!) });
 }));
 
 app.post('/api/servers', asyncRoute(async (req, res) => {
@@ -114,6 +148,16 @@ app.get('/api/audit', asyncRoute(async (_req, res) => {
 
 app.use(express.static(FRONTEND_DIR));
 
+setBroadcast(broadcast);
+
 httpServer.listen(PORT, () => {
   console.log(`[craftdeck] panel en http://localhost:${PORT}`);
 });
+
+// parada limpia: detener los servidores antes de salir
+for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(sig, () => {
+    void stopAll().then(() => process.exit(0));
+    setTimeout(() => process.exit(0), 35_000).unref();
+  });
+}

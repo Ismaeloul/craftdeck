@@ -61,8 +61,8 @@
         </div>
         <div class="card">
           <div class="stat-label"><i data-icon="cpu" data-size="13"></i> Memoria</div>
-          <div class="stat-value"><span id="statRam">3.2</span><span class="unit"> / 6 GB</span></div>
-          <div class="progress-track"><div class="progress-fill" id="ramBar" style="width:53%"></div></div>
+          <div class="stat-value"><span id="statRam">0</span><span class="unit" id="statRamMax"> / — GB</span></div>
+          <div class="progress-track"><div class="progress-fill" id="ramBar" style="width:0%"></div></div>
         </div>
         <div class="card">
           <div class="stat-label"><i data-icon="clock" data-size="13"></i> Uptime</div>
@@ -99,7 +99,7 @@
     <section class="section" id="sec-console">
       <div class="console-wrap">
         <div class="console-head">
-          <span class="live"><span class="dot online" style="width:7px;height:7px"></span> RCON conectado</span>
+          <span class="live"><span class="dot online" style="width:7px;height:7px"></span> Consola en vivo</span>
           <span style="font-family:var(--mono)">latest.log</span>
           <span style="margin-left:auto;display:flex;gap:7px;">
             <button class="btn small ghost" onclick="clearConsole()">Limpiar</button>
@@ -371,6 +371,7 @@
 
 <script src="js/api.js"></script>
 <script src="js/app.js"></script>
+<script src="js/live.js"></script>
 <script src="js/wizard.js"></script>
 </body>
 </html>

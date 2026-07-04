@@ -93,7 +93,9 @@ async function refreshServers() {
       id: s.id,
       name: s.name,
       sub: `${LOADER_LABELS[s.loader] || s.loader} ${s.mcVersion} · :${s.port}`,
-      status: s.provision.status === 'ready' ? 'offline' : s.provision.status,
+      status: s.runtime && s.runtime.status !== 'offline'
+        ? s.runtime.status
+        : (s.provision.status === 'ready' ? 'offline' : s.provision.status),
       meta: s,
     }));
     renderServerMenu();
@@ -106,6 +108,10 @@ async function refreshServers() {
       document.getElementById('ssName').textContent = 'Sin servidores';
       document.getElementById('ssSub').textContent = 'Crea uno para empezar';
       document.getElementById('ssDot').style.background = 'var(--muted)';
+    }
+    if (!window.__liveInit) {
+      window.__liveInit = true;
+      if (typeof onServerSwitched === 'function') onServerSwitched();
     }
   } catch (err) {
     console.warn('No se pudo cargar la lista de servidores', err);
