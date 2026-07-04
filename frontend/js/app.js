@@ -85,14 +85,7 @@ const state = {
     { name:'pre-mod_lithium', size:'1.18 GB', date:'2 jul · 18:22', auto:true },
     { name:'manual_antes-del-raid', size:'1.14 GB', date:'30 jun · 21:45', auto:false },
   ],
-  events: [
-    { ic:'database', color:'var(--info)', bg:'var(--info-dim)', name:'Backup automático', sched:'Diario · 04:00', on:true },
-    { ic:'refresh', color:'var(--accent)', bg:'var(--accent-dim)', name:'Reinicio programado', sched:'Domingos · 06:00', on:true },
-    { ic:'message', color:'#8b9cf9', bg:'rgba(88,101,242,.12)', name:'Aviso "reinicio en 5 min" en el chat', sched:'Domingos · 05:55', on:true },
-    { ic:'zap', color:'var(--warn)', bg:'var(--warn-dim)', name:'Evento doble XP', sched:'Viernes · 18:00 → Dom 23:59', on:false },
-    { ic:'bell', color:'var(--danger)', bg:'var(--danger-dim)', name:'Alerta a Discord si el server se cae', sched:'Al detectar crash', on:true },
-    { ic:'trash', color:'var(--muted2)', bg:'rgba(255,255,255,.06)', name:'Purga de items tirados en el suelo', sched:'Cada 30 min', on:true },
-  ],
+  events: [],
   crashes: [],
   audit: [],
   files: {
@@ -122,7 +115,7 @@ const NAV = [
     { id:'console', label:'Consola', ic:'terminal' },
     { id:'players', label:'Jugadores', ic:'users', badge:'navPlayerCount' },
     { id:'stats', label:'Estadísticas', ic:'barChart' },
-    { id:'map', label:'Mapa en vivo', ic:'map', demo:true },
+    { id:'map', label:'Mapa en vivo', ic:'map', soon:true },
   ]},
   { group:'CONTENIDO', items:[
     { id:'mods', label:'Mods', ic:'package', badge:'navModCount', badgeWarn:true },
@@ -130,12 +123,12 @@ const NAV = [
     { id:'files', label:'Archivos', ic:'fileCode' },
   ]},
   { group:'OPERACIONES', items:[
-    { id:'events', label:'Eventos', ic:'calendar', demo:true },
+    { id:'events', label:'Eventos', ic:'calendar' },
     { id:'backups', label:'Backups', ic:'database' },
     { id:'crashes', label:'Diagnóstico', ic:'alert' },
   ]},
   { group:'SISTEMA', items:[
-    { id:'integrations', label:'Integraciones', ic:'share', demo:true },
+    { id:'integrations', label:'Integraciones', ic:'share' },
     { id:'audit', label:'Auditoría', ic:'list' },
   ]},
 ];
@@ -147,6 +140,7 @@ document.getElementById('navContainer').innerHTML = NAV.map(g =>
     return `<div class="nav-item${it.id==='dashboard'?' active':''}" data-section="${it.id}">
       ${icon(it.ic,16)} ${it.label}
       ${it.demo?'<span class="nav-badge" style="background:rgba(255,255,255,.06);color:var(--muted)">demo</span>':''}
+      ${it.soon?'<span class="nav-badge" style="background:var(--violet-dim);color:var(--violet)">próximamente</span>':''}
       ${it.badge?`<span class="nav-badge${it.badgeWarn?' warn':''}" id="${it.badge}"></span>`:''}
     </div>`;
   }).join('')
@@ -166,6 +160,8 @@ function go(id){
   if(id==='backups') loadBackups();
   if(id==='stats') loadStats();
   if(id==='crashes') loadCrashes();
+  if(id==='events') loadEvents();
+  if(id==='integrations') loadIntegrations();
   if(id==='mods'){ renderModFilters(); loadInstalledMods(); searchModrinth(document.getElementById('modSearch').value.trim(), 0); }
   if(id==='players' && typeof refreshPlayerLists==='function') refreshPlayerLists();
 }
@@ -698,36 +694,260 @@ async function saveFile(){
   } catch(err){ toast('alert', err.message, 'err'); }
 }
 
-/* =================== EVENTS =================== */
-function renderEvents(){
-  document.getElementById('eventList').innerHTML = state.events.map((e,i)=>`
-    <div class="row-item" style="animation-delay:${i*0.04}s">
-      <div class="row-icon" style="background:${e.bg};color:${e.color}">${icon(e.ic,16)}</div>
-      <div class="row-body">
-        <div class="row-title">${e.name} ${e.on?'':'<span class="chip gray">PAUSADO</span>'}</div>
-        <div class="row-sub">${e.sched}</div>
-      </div>
-      <label class="switch"><input type="checkbox" ${e.on?'checked':''} onchange="toggleEvent(${i},this.checked)"><span class="track"></span><span class="thumb"></span></label>
-      <button class="icon-btn red" onclick="deleteEvent(${i})">${icon('trash',13)}</button>
-    </div>`).join('');
+/* =================== EVENTS (programador real) =================== */
+const EV_META = {
+  restart:  { ic:'refresh',  color:'var(--accent)',  bg:'var(--accent-dim)',       label:'Reinicio programado',
+              hint:'Avisa en el chat a los 5 min, 1 min y 10 s, y después reinicia. Solo actúa si el servidor está encendido.' },
+  announce: { ic:'message',  color:'#8b9cf9',        bg:'rgba(88,101,242,.12)',    label:'Anuncio en el chat',
+              hint:'Mensaje de CraftDeck visible para todos los jugadores.' },
+  command:  { ic:'terminal', color:'var(--warn)',    bg:'var(--warn-dim)',         label:'Comando de consola',
+              hint:'Ejecuta cualquier comando de consola: time set day, weather clear, kill @e[type=item]…' },
+  start:    { ic:'play',     color:'var(--info)',    bg:'var(--info-dim)',         label:'Encender el servidor',
+              hint:'Arranca el servidor si está detenido. Útil para tenerlo listo a la hora de jugar.' },
+  stop:     { ic:'power',    color:'var(--danger)',  bg:'var(--danger-dim)',       label:'Apagar el servidor',
+              hint:'Avisa en el chat 1 minuto antes y lo apaga. Ideal para no comer RAM del Umbrel de madrugada.' },
+};
+const DAY_NAMES = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+
+function evTaskName(e){
+  if(e.type==='announce') return `Anuncio: «${esc(e.payload)}»`;
+  if(e.type==='command') return `Comando: <span style="font-family:var(--mono);font-size:12px">/${esc(e.payload)}</span>`;
+  return EV_META[e.type]?.label || e.type;
 }
-function toggleEvent(i,on){ state.events[i].on=on; renderEvents(); toast(on?'check':'x',`«${state.events[i].name}» ${on?'activada':'pausada'}`, on?'ok':'warn'); }
-function deleteEvent(i){ const e=state.events.splice(i,1)[0]; renderEvents(); renderDashTasks(); toast('trash',`Tarea «${e.name}» eliminada`,'warn'); addAudit('trash','Eliminó la tarea programada: '+e.name,'warn'); }
-function addEvent(){
-  state.events.push({ ic:'message', color:'var(--accent)', bg:'var(--accent-dim)', name:'Anuncio: ¡Recuerda votar el server!', sched:'Cada 2 h', on:true });
+function schedLabel(s){
+  if(s.kind==='interval'){
+    const n = s.everyMinutes || 60;
+    return n<60 ? `Cada ${n} min` : n===60 ? 'Cada hora' : `Cada ${Math.round(n/60)} h`;
+  }
+  const days = s.kind==='weekly' ? (s.days||[]).map(d=>DAY_NAMES[d]).join(', ') : 'Diario';
+  return `${days || 'Diario'} · ${s.time || '06:00'}`;
+}
+function fmtNext(iso){
+  const d = new Date(iso), diff = (d - Date.now())/60000;
+  if(diff < 1.5) return 'en un momento';
+  if(diff < 60) return `en ${Math.round(diff)} min`;
+  if(diff < 36*60) return `en ${Math.round(diff/60)} h`;
+  return d.toLocaleString('es-ES',{weekday:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+}
+
+async function loadEvents(){
+  const id = curServerId(); if(!id) return;
+  try { ({ events: state.events } = await API.get(`/servers/${id}/events`)); } catch { state.events = []; }
   renderEvents(); renderDashTasks();
-  toast('plus','Tarea creada (demo: editor completo en la app real)','ok');
-  addAudit('plus','Creó una tarea programada','ok');
+}
+function backupTaskRow(){
+  const meta = state.servers[state.currentServer]?.meta;
+  if(!meta) return '';
+  const on = meta.backupAuto !== false;
+  return `
+    <div class="row-item">
+      <div class="row-icon" style="background:var(--info-dim);color:var(--info)">${icon('database',16)}</div>
+      <div class="row-body">
+        <div class="row-title">Backup automático ${on?'':'<span class="chip gray">PAUSADO</span>'}</div>
+        <div class="row-sub">Diario · 04:00 · conserva los últimos ${meta.backupKeep ?? 7} · integrado</div>
+      </div>
+      <label class="switch"><input type="checkbox" ${on?'checked':''} onchange="toggleBackupFromEvents(this.checked)"><span class="track"></span><span class="thumb"></span></label>
+      <span style="width:30px"></span>
+    </div>`;
+}
+async function toggleBackupFromEvents(on){
+  try {
+    await API.put(`/servers/${curServerId()}/backup-settings`, { auto: on });
+    const meta = state.servers[state.currentServer]?.meta;
+    if(meta) meta.backupAuto = on;
+    toast(on?'check':'x', on?'Backup diario activado':'Backup diario desactivado', on?'ok':'warn');
+    renderEvents(); renderDashTasks();
+  } catch(err){ toast('alert', err.message, 'err'); }
+}
+function renderEvents(){
+  const rows = state.events.map((e,i)=>{
+    const m = EV_META[e.type] || EV_META.command;
+    return `
+    <div class="row-item" style="animation-delay:${i*0.04}s">
+      <div class="row-icon" style="background:${m.bg};color:${m.color}">${icon(m.ic,16)}</div>
+      <div class="row-body">
+        <div class="row-title">${evTaskName(e)} ${e.enabled?'':'<span class="chip gray">PAUSADO</span>'}</div>
+        <div class="row-sub">${schedLabel(e.schedule)}${e.enabled?` · próxima ${fmtNext(e.next)}`:''}</div>
+      </div>
+      <label class="switch"><input type="checkbox" ${e.enabled?'checked':''} onchange="toggleEventTask('${e.id}',this.checked)"><span class="track"></span><span class="thumb"></span></label>
+      <button class="icon-btn red" onclick="deleteEventTask('${e.id}')">${icon('trash',13)}</button>
+    </div>`;
+  }).join('');
+  document.getElementById('eventList').innerHTML = backupTaskRow() + (rows ||
+    '<div class="empty">Sin tareas todavía. Crea la primera con «Nueva tarea»: reinicios con aviso, anuncios, comandos con horario…</div>');
+}
+async function toggleEventTask(id, on){
+  try {
+    await API.post(`/servers/${curServerId()}/events/${id}/toggle`, { enabled: on });
+    const e = state.events.find(x=>x.id===id); if(e) e.enabled = on;
+    toast(on?'check':'x', `Tarea ${on?'activada':'pausada'}`, on?'ok':'warn');
+    renderEvents(); renderDashTasks();
+  } catch(err){ toast('alert', err.message, 'err'); loadEvents(); }
+}
+async function deleteEventTask(id){
+  try {
+    await API.del(`/servers/${curServerId()}/events/${id}`);
+    toast('trash','Tarea eliminada','warn');
+    loadEvents();
+  } catch(err){ toast('alert', err.message, 'err'); }
 }
 function renderDashTasks(){
-  document.getElementById('dashTasks').innerHTML = state.events.filter(e=>e.on).slice(0,4).map(e=>`
+  const meta = state.servers[state.currentServer]?.meta;
+  const items = state.events.filter(e=>e.enabled)
+    .sort((a,b)=>new Date(a.next)-new Date(b.next))
+    .map(e=>({ m: EV_META[e.type]||EV_META.command, name: evTaskName(e), when: fmtNext(e.next) }));
+  if(meta && meta.backupAuto !== false)
+    items.push({ m:{ic:'database',color:'var(--info)'}, name:'Backup automático', when:'diario · 04:00' });
+  document.getElementById('dashTasks').innerHTML = items.slice(0,4).map(t=>`
     <div style="display:flex;align-items:center;gap:11px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:12.5px;">
-      <span style="color:${e.color};display:flex">${icon(e.ic,14)}</span>
-      <span style="flex:1">${e.name}</span>
-      <span style="color:var(--muted);font-size:11.5px;font-variant-numeric:tabular-nums">${e.sched}</span>
-    </div>`).join('');
+      <span style="color:${t.m.color};display:flex">${icon(t.m.ic,14)}</span>
+      <span style="flex:1">${t.name}</span>
+      <span style="color:var(--muted);font-size:11.5px;font-variant-numeric:tabular-nums">${t.when}</span>
+    </div>`).join('') || '<div class="empty" style="padding:16px">Sin tareas programadas</div>';
 }
-renderEvents(); renderDashTasks();
+
+/* ---- editor de tareas ---- */
+document.getElementById('evDays').innerHTML = DAY_NAMES.map((d,i)=>
+  `<span class="day-chip${i===0?' on':''}" data-day="${i}" onclick="this.classList.toggle('on')">${d}</span>`).join('');
+function toggleEventEditor(show){
+  const ed = document.getElementById('eventEditor');
+  const open = show !== undefined ? show : ed.style.display === 'none';
+  ed.style.display = open ? '' : 'none';
+  if(open){ evTypeChanged(); evSchedChanged(); }
+}
+function evTypeChanged(){
+  const t = document.getElementById('evType').value;
+  document.getElementById('evTypeHint').textContent = EV_META[t].hint;
+  const f = document.getElementById('evPayloadField');
+  f.style.display = (t==='announce'||t==='command') ? '' : 'none';
+  document.getElementById('evPayloadLabel').textContent = t==='command' ? 'Comando (sin la /)' : 'Mensaje';
+  document.getElementById('evPayload').placeholder = t==='command' ? 'time set day' : '¡Recuerda votar el server!';
+}
+function evSchedChanged(){
+  const k = document.getElementById('evSchedKind').value;
+  document.getElementById('evTimeField').style.display = k==='interval' ? 'none' : '';
+  document.getElementById('evDaysField').style.display = k==='weekly' ? '' : 'none';
+  document.getElementById('evEveryField').style.display = k==='interval' ? '' : 'none';
+}
+async function createEventTask(){
+  const type = document.getElementById('evType').value;
+  const payload = document.getElementById('evPayload').value.trim();
+  const kind = document.getElementById('evSchedKind').value;
+  if((type==='announce'||type==='command') && !payload){
+    toast('alert', type==='announce'?'Escribe el mensaje del anuncio':'Escribe el comando','warn'); return;
+  }
+  const schedule = { kind };
+  if(kind==='interval') schedule.everyMinutes = parseInt(document.getElementById('evEvery').value);
+  else schedule.time = document.getElementById('evTime').value || '06:00';
+  if(kind==='weekly'){
+    schedule.days = [...document.querySelectorAll('#evDays .day-chip.on')].map(c=>parseInt(c.dataset.day));
+    if(!schedule.days.length){ toast('alert','Elige al menos un día','warn'); return; }
+  }
+  try {
+    await API.post(`/servers/${curServerId()}/events`, { type, payload, schedule });
+    toast('check','Tarea creada — el backend se encarga aunque cierres el panel','ok');
+    document.getElementById('evPayload').value = '';
+    toggleEventEditor(false);
+    loadEvents();
+  } catch(err){ toast('alert', err.message, 'err'); }
+}
+
+/* =================== INTEGRACIONES =================== */
+function renderDiscordChip(connected){
+  const chip = document.getElementById('dcChip');
+  chip.textContent = connected ? 'CONECTADO' : 'SIN CONECTAR';
+  chip.className = 'chip ' + (connected ? 'green' : 'gray');
+  document.getElementById('dcOffBtn').style.display = connected ? '' : 'none';
+}
+async function loadIntegrations(){
+  const meta = state.servers[state.currentServer]?.meta;
+  const d = meta?.discord;
+  document.getElementById('dcUrl').value = d?.url || '';
+  document.getElementById('dcStatus').checked = d ? d.onStatus : true;
+  document.getElementById('dcPlayers').checked = d ? d.onPlayers : true;
+  document.getElementById('dcBackup').checked = d ? d.onBackup : false;
+  document.getElementById('dcChat').checked = d ? d.chatMirror : false;
+  renderDiscordChip(!!d?.url);
+  try { renderPlayit(await API.get('/playit')); } catch { /* backend sin playit */ }
+}
+async function saveDiscord(){
+  const url = document.getElementById('dcUrl').value.trim();
+  if(!url){ toast('alert','Pega primero la URL del webhook','warn'); return; }
+  try {
+    await API.put(`/servers/${curServerId()}/discord`, {
+      url,
+      onStatus: document.getElementById('dcStatus').checked,
+      onPlayers: document.getElementById('dcPlayers').checked,
+      onBackup: document.getElementById('dcBackup').checked,
+      chatMirror: document.getElementById('dcChat').checked,
+    });
+    renderDiscordChip(true);
+    await refreshServers();
+    toast('check','Discord conectado — dale a «Enviar prueba» para comprobarlo','ok');
+  } catch(err){ toast('alert', err.message, 'err'); }
+}
+async function testDiscord(){
+  const btn = document.getElementById('dcTestBtn');
+  btn.disabled = true;
+  try { await API.post(`/servers/${curServerId()}/discord/test`); toast('send','Mensaje de prueba enviado — míralo en tu canal','ok'); }
+  catch(err){ toast('alert', err.message, 'err'); }
+  btn.disabled = false;
+}
+async function disconnectDiscord(){
+  try {
+    await API.put(`/servers/${curServerId()}/discord`, { url: '' });
+    document.getElementById('dcUrl').value = '';
+    renderDiscordChip(false);
+    await refreshServers();
+    toast('x','Discord desconectado','warn');
+  } catch(err){ toast('alert', err.message, 'err'); }
+}
+
+function renderPlayit(st){
+  state.playit = st;
+  const chip = document.getElementById('ptChip');
+  chip.textContent = st.running ? 'ACTIVO' : 'APAGADO';
+  chip.className = 'chip ' + (st.running ? 'green' : 'gray');
+  document.getElementById('ptBtn').textContent = st.running ? 'Detener' : 'Arrancar';
+  document.getElementById('ptBody').style.display = st.running ? 'none' : '';
+  const claim = document.getElementById('ptClaim');
+  if(st.running && st.claimUrl){
+    claim.style.display = '';
+    claim.innerHTML = `
+      <p style="font-size:12px;color:var(--warn);font-weight:600;margin-bottom:8px;">Falta un paso: reclama el agente con tu cuenta</p>
+      <div class="copy-field"><span>${esc(st.claimUrl)}</span>
+        <button class="icon-btn" onclick="copyText('${esc(st.claimUrl)}')">${icon('copy',13)}</button>
+        <a class="icon-btn" href="${esc(st.claimUrl)}" target="_blank" rel="noopener">${icon('link',13)}</a>
+      </div>
+      <p style="font-size:11.5px;color:var(--muted);margin-top:8px;line-height:1.5;">Abre el enlace, inicia sesión en playit.gg y crea un túnel <b>Minecraft Java</b> hacia el puerto de tu server. La dirección que te den es la que compartes con tus amigos.</p>`;
+  } else claim.style.display = 'none';
+  const log = document.getElementById('ptLog');
+  if(st.running && st.lastLines?.length){
+    log.style.display = '';
+    log.textContent = st.lastLines.join('\n');
+    log.scrollTop = log.scrollHeight;
+  } else log.style.display = 'none';
+}
+function copyText(t){ navigator.clipboard?.writeText(t); copied(); }
+async function togglePlayit(){
+  const btn = document.getElementById('ptBtn');
+  btn.disabled = true;
+  try {
+    if(state.playit?.running){ await API.post('/playit/stop'); toast('wifi','Túnel detenido','warn'); }
+    else { await API.post('/playit/start'); toast('wifi','Arrancando el agente de playit…','info'); }
+    renderPlayit(await API.get('/playit'));
+  } catch(err){ toast('alert', err.message, 'err'); }
+  btn.disabled = false;
+}
+onWS(async (msg)=>{
+  if(msg.type!=='playit') return;
+  try { renderPlayit(await API.get('/playit')); } catch { /* sin conexión */ }
+});
+setInterval(async ()=>{
+  if(!state.playit?.running) return;
+  if(!document.getElementById('sec-integrations').classList.contains('visible')) return;
+  try { renderPlayit(await API.get('/playit')); } catch { /* sin conexión */ }
+}, 5000);
 
 /* =================== BACKUPS =================== */
 function fmtSize(b){ return b>=1073741824 ? (b/1073741824).toFixed(2)+' GB' : (b/1048576).toFixed(1)+' MB'; }

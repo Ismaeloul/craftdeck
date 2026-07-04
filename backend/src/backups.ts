@@ -21,6 +21,7 @@ import { BACKUPS_DIR } from './paths.js';
 import { run } from './util.js';
 import { listServers, getServer, serverDir, audit } from './store.js';
 import { runtimeOf, sendCommand } from './instance.js';
+import { discordEvent } from './discord.js';
 
 // no tiene sentido meter en el zip lo que se puede volver a descargar
 const EXCLUDE_DIRS = new Set(['libraries', 'versions', 'cache', 'logs', 'crash-reports']);
@@ -85,6 +86,7 @@ export async function makeBackup(id: string, auto = false): Promise<BackupInfo> 
     if (running) sendCommand(id, 'save-on');
     const st = await stat(dest);
     await audit('database', `Creó un backup de ${meta.name} (${(st.size / 1048576).toFixed(1)} MB)`, 'ok');
+    void discordEvent(id, 'backup', `${name}.zip · ${(st.size / 1048576).toFixed(1)} MB`);
     broadcastFn('backup', { id, name });
     return { name, size: st.size, createdAt: st.mtime.toISOString(), auto };
   } finally {

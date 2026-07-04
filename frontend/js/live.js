@@ -60,6 +60,7 @@ async function onServerSwitched(){
   } catch { /* ignorar */ }
   refreshPlayerLists();
   loadAudit();
+  loadEvents(); // rellena también «Próximas tareas» del dashboard
   const visible = document.querySelector('.section.visible')?.id;
   if(visible==='sec-world') loadWorld();
   if(visible==='sec-files') loadFiles();

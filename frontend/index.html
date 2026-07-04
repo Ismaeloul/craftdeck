@@ -279,7 +279,59 @@
       <div class="section-head">
         <h2>Programador de eventos</h2>
         <p>Tareas automáticas · viven en el backend, no dependen del panel</p>
-        <div class="right"><button class="btn primary" onclick="addEvent()"><i data-icon="plus" data-size="14"></i> Nueva tarea</button></div>
+        <div class="right"><button class="btn primary" id="btnNewEvent" onclick="toggleEventEditor()"><i data-icon="plus" data-size="14"></i> Nueva tarea</button></div>
+      </div>
+      <div class="card" id="eventEditor" style="display:none; margin-bottom:14px;">
+        <h3><i data-icon="calendar" data-size="15"></i> Nueva tarea programada</h3>
+        <div class="form-grid" style="margin-top:12px;">
+          <div class="field">
+            <label>¿Qué hace?</label>
+            <select id="evType" onchange="evTypeChanged()">
+              <option value="restart">Reinicio programado (avisa en el chat)</option>
+              <option value="announce">Anuncio en el chat</option>
+              <option value="command">Comando de consola</option>
+              <option value="start">Encender el servidor</option>
+              <option value="stop">Apagar el servidor (avisa 1 min antes)</option>
+            </select>
+            <p id="evTypeHint" style="font-size:11.5px;color:var(--muted);margin-top:7px;line-height:1.5;"></p>
+          </div>
+          <div class="field" id="evPayloadField" style="display:none;">
+            <label id="evPayloadLabel">Mensaje</label>
+            <input type="text" id="evPayload" placeholder="">
+          </div>
+          <div class="field">
+            <label>¿Cuándo?</label>
+            <select id="evSchedKind" onchange="evSchedChanged()">
+              <option value="daily">Cada día, a una hora</option>
+              <option value="weekly">Días concretos de la semana</option>
+              <option value="interval">Cada X tiempo</option>
+            </select>
+          </div>
+          <div class="field" id="evTimeField">
+            <label>Hora</label>
+            <input type="time" id="evTime" value="06:00">
+          </div>
+          <div class="field" id="evDaysField" style="display:none;">
+            <label>Días</label>
+            <div class="day-chips" id="evDays"></div>
+          </div>
+          <div class="field" id="evEveryField" style="display:none;">
+            <label>Repetir</label>
+            <select id="evEvery">
+              <option value="15">Cada 15 minutos</option>
+              <option value="30">Cada 30 minutos</option>
+              <option value="60" selected>Cada hora</option>
+              <option value="120">Cada 2 horas</option>
+              <option value="240">Cada 4 horas</option>
+              <option value="360">Cada 6 horas</option>
+              <option value="720">Cada 12 horas</option>
+            </select>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:16px;">
+          <button class="btn primary" onclick="createEventTask()"><i data-icon="check" data-size="14"></i> Crear tarea</button>
+          <button class="btn" onclick="toggleEventEditor(false)">Cancelar</button>
+        </div>
       </div>
       <div class="card" style="padding:10px;"><div id="eventList"></div></div>
     </section>
@@ -321,51 +373,45 @@
           <div class="int-head">
             <div class="int-icon" style="background:rgba(88,101,242,.12); color:#8b9cf9"><i data-icon="message" data-size="20"></i></div>
             <div style="flex:1">
-              <div class="int-title">Discord <span class="chip green">CONECTADO</span></div>
-              <div class="int-sub">Espejo del chat, avisos de conexión y alertas de crash</div>
-            </div>
-            <label class="switch"><input type="checkbox" checked onchange="toast('message', this.checked?'Integración con Discord activada':'Integración con Discord desactivada', this.checked?'ok':'warn')"><span class="track"></span><span class="thumb"></span></label>
-          </div>
-          <div class="copy-field"><span>https://discord.com/api/webhooks/1123…a8f2</span><button class="icon-btn" onclick="copied()"><i data-icon="copy" data-size="13"></i></button></div>
-          <button class="btn small" style="margin-top:12px;" onclick="toast('check','Mensaje de prueba enviado a #minecraft','ok')">Enviar prueba</button>
-        </div>
-
-        <div class="card">
-          <div class="int-head">
-            <div class="int-icon" style="background:var(--violet-dim); color:var(--violet)"><i data-icon="shield" data-size="20"></i></div>
-            <div style="flex:1">
-              <div class="int-title">Tailscale <span class="chip green">ACTIVO</span></div>
-              <div class="int-sub">Acceso remoto seguro al panel sin abrir puertos · viene con Umbrel</div>
+              <div class="int-title">Discord <span class="chip gray" id="dcChip">SIN CONECTAR</span></div>
+              <div class="int-sub">Avisos del servidor en tu canal, vía webhook · sin bots ni tokens</div>
             </div>
           </div>
-          <div class="copy-field"><span>https://umbrel.tail8a3f.ts.net:8443/craftdeck</span><button class="icon-btn" onclick="copied()"><i data-icon="copy" data-size="13"></i></button></div>
-          <p style="font-size:11.5px;color:var(--muted);margin-top:10px;line-height:1.5;">Entra al panel desde el móvil o desde fuera de casa con tu red privada Tailscale.</p>
+          <div class="field" style="margin-top:12px;">
+            <label>URL del webhook <span style="font-weight:400;color:var(--muted)">· Canal → Ajustes → Integraciones → Webhooks</span></label>
+            <input type="url" id="dcUrl" placeholder="https://discord.com/api/webhooks/…">
+          </div>
+          <div id="dcToggles" style="margin-top:4px;">
+            <div class="toggle-row"><div><div class="t-label">Estado del servidor</div><div class="t-sub">Encendido, apagado y la alerta de crash</div></div><label class="switch"><input type="checkbox" id="dcStatus" checked><span class="track"></span><span class="thumb"></span></label></div>
+            <div class="toggle-row"><div><div class="t-label">Jugadores</div><div class="t-sub">Aviso cuando alguien entra o sale</div></div><label class="switch"><input type="checkbox" id="dcPlayers" checked><span class="track"></span><span class="thumb"></span></label></div>
+            <div class="toggle-row"><div><div class="t-label">Backups</div><div class="t-sub">Aviso al completarse cada backup</div></div><label class="switch"><input type="checkbox" id="dcBackup"><span class="track"></span><span class="thumb"></span></label></div>
+            <div class="toggle-row"><div><div class="t-label">Espejo del chat</div><div class="t-sub">Copia el chat del juego en el canal (agrupado, sin spam)</div></div><label class="switch"><input type="checkbox" id="dcChat"><span class="track"></span><span class="thumb"></span></label></div>
+          </div>
+          <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;">
+            <button class="btn primary small" onclick="saveDiscord()"><i data-icon="save" data-size="13"></i> Guardar</button>
+            <button class="btn small" id="dcTestBtn" onclick="testDiscord()"><i data-icon="send" data-size="13"></i> Enviar prueba</button>
+            <button class="btn small ghost" id="dcOffBtn" style="display:none;" onclick="disconnectDiscord()">Desconectar</button>
+          </div>
         </div>
 
         <div class="card">
           <div class="int-head">
             <div class="int-icon" style="background:var(--info-dim); color:var(--info)"><i data-icon="wifi" data-size="20"></i></div>
             <div style="flex:1">
-              <div class="int-title">Túnel playit.gg <span class="chip green">TÚNEL ABIERTO</span></div>
+              <div class="int-title">Túnel playit.gg <span class="chip gray" id="ptChip">APAGADO</span></div>
               <div class="int-sub">Tus amigos se conectan sin que abras puertos en el router</div>
             </div>
-            <label class="switch"><input type="checkbox" checked onchange="toast('wifi', this.checked?'Túnel abierto':'Túnel cerrado', this.checked?'ok':'warn')"><span class="track"></span><span class="thumb"></span></label>
+            <button class="btn small" id="ptBtn" onclick="togglePlayit()">Arrancar</button>
           </div>
-          <div class="copy-field"><span>craftdeck-isma.playit.gg:25565</span><button class="icon-btn" onclick="copied()"><i data-icon="copy" data-size="13"></i></button></div>
-          <p style="font-size:11.5px;color:var(--muted);margin-top:10px;line-height:1.5;">Comparte esta dirección: funciona aunque tu IP cambie.</p>
-        </div>
-
-        <div class="card">
-          <div class="int-head">
-            <div class="int-icon" style="background:var(--warn-dim); color:var(--warn)"><i data-icon="eye" data-size="20"></i></div>
-            <div style="flex:1">
-              <div class="int-title">Modo espectador web</div>
-              <div class="int-sub">Enlace de solo lectura: estado, jugadores y mapa, sin poder tocar nada</div>
-            </div>
-            <label class="switch"><input type="checkbox" onchange="toast('eye', this.checked?'Enlace de espectador activado':'Enlace desactivado', this.checked?'ok':'warn')"><span class="track"></span><span class="thumb"></span></label>
+          <div id="ptBody" style="margin-top:12px;">
+            <p style="font-size:11.5px;color:var(--muted);line-height:1.6;">
+              La primera vez, playit te dará un enlace para <b>reclamar el agente</b> con tu cuenta (gratis).
+              Después creas el túnel hacia el puerto de tu server en su web, y la dirección que te den es la que compartes:
+              funciona aunque tu IP cambie.
+            </p>
           </div>
-          <div class="copy-field"><span>https://umbrel.local/craftdeck/view/kX9m2…</span><button class="icon-btn" onclick="copied()"><i data-icon="copy" data-size="13"></i></button></div>
-          <button class="btn small" style="margin-top:12px;" onclick="toast('refresh','Enlace regenerado — el anterior queda invalidado','ok')">Regenerar enlace</button>
+          <div id="ptClaim" style="display:none;margin-top:12px;"></div>
+          <div id="ptLog" style="display:none;margin-top:12px;font-family:var(--mono);font-size:11px;color:var(--muted2);background:var(--bg2);border:1px solid var(--border);border-radius:9px;padding:10px 12px;max-height:150px;overflow:auto;line-height:1.7;"></div>
         </div>
 
       </div>

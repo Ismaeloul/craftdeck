@@ -11,7 +11,7 @@ import { listForgeVersions } from './catalog/forge.js';
 import { listNeoForgeVersions } from './catalog/neoforge.js';
 import { provisionServer } from './provision.js';
 import {
-  setBroadcast, runtimeOf, consoleOf, startServer, stopServer, sendCommand, stopAll,
+  setBroadcast, runtimeOf, consoleOf, startServer, stopServer, sendCommand, stopAll, announceInGame,
 } from './instance.js';
 import { playerLists, playerAction } from './players.js';
 import {
@@ -25,6 +25,11 @@ import { listMods, installMod, removeMod, toggleMod, checkModUpdates, updateMod,
 import { createZip } from './backups.js';
 import { playerStats } from './stats.js';
 import { listCrashes, crashText } from './crashes.js';
+import {
+  listEvents, addEvent, toggleEvent, deleteEvent, removeEventsOfServer, initEvents, EventType, Schedule,
+} from './events.js';
+import { testWebhook } from './discord.js';
+import { playitStatus, startPlayit, stopPlayit, setPlayitBroadcast } from './playit.js';
 import {
   Loader, ServerMeta, listServers, getServer, addServer, removeServer, updateServer,
   serverDir, nextFreePort, audit, readAudit,
@@ -165,6 +170,7 @@ app.delete('/api/servers/:id', asyncRoute(async (req, res) => {
   }
   await stopServer(meta.id);
   await removeServer(meta.id);
+  await removeEventsOfServer(meta.id);
   await rm(serverDir(meta.id), { recursive: true, force: true });
   await rm(path.join(BACKUPS_DIR, meta.id), { recursive: true, force: true });
   await audit('trash', `Eliminó el servidor ${meta.name}`, 'warn');
@@ -210,11 +216,6 @@ const VALUE_LABELS: Record<string, string> = {
   survival: 'Supervivencia', creative: 'Creativo', adventure: 'Aventura', spectator: 'Espectador',
   true: 'activado', false: 'desactivado',
 };
-
-/** Anuncio visible para todos los jugadores en el chat del juego. */
-export function announceInGame(id: string, text: string): void {
-  sendCommand(id, `tellraw @a ["",{"text":"⚙ CraftDeck · ","color":"aqua"},{"text":${JSON.stringify(text)},"color":"yellow"}]`);
-}
 
 app.put('/api/servers/:id/properties', asyncRoute(async (req, res) => {
   const id = req.params.id!;
@@ -366,6 +367,77 @@ app.put('/api/servers/:id/backup-settings', asyncRoute(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// ---- eventos programados ----
+const EVENT_TYPES: EventType[] = ['restart', 'announce', 'command', 'start', 'stop'];
+
+app.get('/api/servers/:id/events', asyncRoute(async (req, res) => {
+  res.json({ events: await listEvents(req.params.id!) });
+}));
+
+app.post('/api/servers/:id/events', asyncRoute(async (req, res) => {
+  const { type, payload, schedule } = req.body as { type?: EventType; payload?: string; schedule?: Schedule };
+  if (!type || !EVENT_TYPES.includes(type)) { res.status(400).json({ error: 'Tipo de tarea inválido' }); return; }
+  if ((type === 'announce' || type === 'command') && !payload?.trim()) {
+    res.status(400).json({ error: type === 'announce' ? 'Escribe el mensaje del anuncio' : 'Escribe el comando' });
+    return;
+  }
+  if (!schedule || !['daily', 'weekly', 'interval'].includes(schedule.kind)) { res.status(400).json({ error: 'Horario inválido' }); return; }
+  if (payload && /[\r\n]/.test(payload)) { res.status(400).json({ error: 'Contenido inválido' }); return; }
+  res.status(201).json(await addEvent(req.params.id!, type, (payload ?? '').trim(), schedule));
+}));
+
+app.post('/api/servers/:id/events/:tid/toggle', asyncRoute(async (req, res) => {
+  const { enabled } = req.body as { enabled?: boolean };
+  await toggleEvent(req.params.id!, req.params.tid!, !!enabled);
+  res.json({ ok: true });
+}));
+
+app.delete('/api/servers/:id/events/:tid', asyncRoute(async (req, res) => {
+  await deleteEvent(req.params.id!, req.params.tid!);
+  res.json({ ok: true });
+}));
+
+// ---- integraciones ----
+app.put('/api/servers/:id/discord', asyncRoute(async (req, res) => {
+  const { url, onStatus, onPlayers, onBackup, chatMirror } = req.body as {
+    url?: string; onStatus?: boolean; onPlayers?: boolean; onBackup?: boolean; chatMirror?: boolean;
+  };
+  const meta = await getServer(req.params.id!);
+  if (!meta) { res.status(404).json({ error: 'Servidor no encontrado' }); return; }
+  if (url && !/^https:\/\/(discord\.com|discordapp\.com)\/api\/webhooks\//.test(url)) {
+    res.status(400).json({ error: 'Eso no parece una URL de webhook de Discord' });
+    return;
+  }
+  await updateServer(meta.id, {
+    discord: url
+      ? { url, onStatus: onStatus ?? true, onPlayers: onPlayers ?? true, onBackup: onBackup ?? false, chatMirror: chatMirror ?? false }
+      : undefined,
+  });
+  await audit('message', url ? 'Configuró la integración con Discord' : 'Desconectó Discord', 'info');
+  res.json({ ok: true });
+}));
+
+app.post('/api/servers/:id/discord/test', asyncRoute(async (req, res) => {
+  const meta = await getServer(req.params.id!);
+  if (!meta?.discord?.url) { res.status(400).json({ error: 'Configura primero el webhook' }); return; }
+  await testWebhook(meta.discord.url);
+  res.json({ ok: true });
+}));
+
+app.get('/api/playit', asyncRoute(async (_req, res) => {
+  res.json(playitStatus());
+}));
+
+app.post('/api/playit/start', asyncRoute(async (_req, res) => {
+  await startPlayit();
+  res.json({ ok: true });
+}));
+
+app.post('/api/playit/stop', asyncRoute(async (_req, res) => {
+  await stopPlayit();
+  res.json({ ok: true });
+}));
+
 // ---- auditoría ----
 app.get('/api/audit', asyncRoute(async (_req, res) => {
   res.json(await readAudit());
@@ -375,7 +447,9 @@ app.use(express.static(FRONTEND_DIR));
 
 setBroadcast(broadcast);
 setBackupBroadcast(broadcast);
+setPlayitBroadcast(broadcast);
 scheduleAutoBackups();
+void initEvents();
 
 httpServer.listen(PORT, () => {
   console.log(`[craftdeck] panel en http://localhost:${PORT}`);

@@ -3,6 +3,7 @@ import path from 'node:path';
 import pidusage from 'pidusage';
 import { APP_VERSION } from './paths.js';
 import { ServerMeta, getServer, updateServer, serverDir, audit } from './store.js';
+import { discordEvent } from './discord.js';
 import { ensureJre, pickJavaMajor } from './java.js';
 import { getVanillaVersionInfo } from './catalog/vanilla.js';
 
@@ -53,17 +54,22 @@ function pushLine(id: string, i: Instance, line: string): void {
   if (i.status === 'starting' && /Done \([\d.,]+\s*s(econds)?\)!/.test(line)) {
     i.status = 'online';
     broadcastFn('status', { id, status: 'online' });
+    void discordEvent(id, 'online', 'El servidor está listo para jugar.');
   }
   let m = line.match(/\]:?\s(\S{1,16}) joined the game/);
   if (m) {
     if (!i.players.some((p) => p.name === m![1])) i.players.push({ name: m[1]!, joinedAt: Date.now() });
     broadcastFn('players', { id, players: i.players });
+    void discordEvent(id, 'join', m[1]!);
   }
   m = line.match(/\]:?\s(\S{1,16}) left the game/);
   if (m) {
     i.players = i.players.filter((p) => p.name !== m![1]);
     broadcastFn('players', { id, players: i.players });
+    void discordEvent(id, 'leave', m[1]!);
   }
+  m = line.match(/\]:?\s<(\S{1,16})> (.*)$/);
+  if (m) void discordEvent(id, 'chat', `**${m[1]}** ${m[2]}`);
 }
 
 function launchArgs(meta: ServerMeta): string[] {
@@ -131,7 +137,12 @@ export async function startServer(id: string): Promise<void> {
       ? `[CraftDeck] El servidor terminó inesperadamente (código ${code})`
       : '[CraftDeck] Servidor detenido.');
     broadcastFn('status', { id, status: 'offline', crashed: crashed || undefined });
-    if (crashed) void audit('alert', `${meta.name} se cerró inesperadamente (código ${code})`, 'err');
+    if (crashed) {
+      void audit('alert', `${meta.name} se cerró inesperadamente (código ${code})`, 'err');
+      void discordEvent(id, 'crash', `Terminó inesperadamente (código ${code}). Mira Diagnóstico en el panel.`);
+    } else {
+      void discordEvent(id, 'offline', 'Servidor detenido correctamente.');
+    }
   });
   proc.on('error', (err) => {
     pushLine(id, i, `[CraftDeck] Error lanzando Java: ${err.message}`);
@@ -158,6 +169,11 @@ export function sendCommand(id: string, cmd: string): void {
   if (!i.proc || i.status === 'offline') throw new Error('El servidor no está en marcha');
   i.proc.stdin!.write(cmd + '\n');
   pushLine(id, i, `> ${cmd}`);
+}
+
+/** Anuncio visible para todos los jugadores en el chat del juego. */
+export function announceInGame(id: string, text: string): void {
+  sendCommand(id, `tellraw @a ["",{"text":"⚙ CraftDeck · ","color":"aqua"},{"text":${JSON.stringify(text)},"color":"yellow"}]`);
 }
 
 export function anyRunning(): boolean {

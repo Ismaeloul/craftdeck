@@ -22,6 +22,7 @@ export interface ServerMeta {
   launch?: LaunchSpec;
   backupAuto?: boolean; // default true
   backupKeep?: number;  // default 7
+  discord?: { url: string; onStatus: boolean; onPlayers: boolean; onBackup: boolean; chatMirror: boolean };
 }
 
 const SERVERS_FILE = path.join(DATA_DIR, 'servers.json');
