@@ -1,5 +1,5 @@
 manifestVersion: 1
-id: isma-apps-craftdeck
+id: ismaeloul-craftdeck
 category: networking
 name: CraftDeck
 version: "0.1.0"
@@ -15,18 +15,18 @@ description: >-
 
   Tus amigos se conectan a la IP de tu Umbrel por el puerto de cada servidor
   (25565 en adelante).
-developer: Isma
-website: https://github.com/CAMBIAME/craftdeck
+developer: Ismaeloul
+website: https://github.com/Ismaeloul/craftdeck
 dependencies: []
-repo: https://github.com/CAMBIAME/craftdeck
-support: https://github.com/CAMBIAME/craftdeck/issues
+repo: https://github.com/Ismaeloul/craftdeck
+support: https://github.com/Ismaeloul/craftdeck/issues
 port: 8449
 gallery: []
 path: ""
 defaultUsername: ""
 defaultPassword: ""
-submitter: Isma
-submission: https://github.com/CAMBIAME/craftdeck
+submitter: Ismaeloul
+submission: https://github.com/Ismaeloul/craftdeck
 releaseNotes: >-
   Primera versión: creación de servidores (Vanilla/Fabric/Forge/NeoForge),
   consola en vivo, jugadores, mundo, archivos y backups.

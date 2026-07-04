@@ -20,18 +20,16 @@ No hace falta tener Java: se descarga solo en `backend/data/runtimes/`.
 docker compose up --build
 ```
 
-## Desplegar en tu Umbrel
+## Desplegar en el Umbrel
 
-1. **Sube este repo a GitHub** (público), p. ej. `github.com/TUUSUARIO/craftdeck`.
-2. **Publica la imagen**: crea un tag y súbelo — GitHub Actions construye la imagen multi-arch (amd64 + arm64) y la publica en GHCR:
+1. **Publicar imagen**: cada tag `vX.Y.Z` dispara GitHub Actions, que construye la imagen multi-arch (amd64 + arm64) y la publica en `ghcr.io/ismaeloul/craftdeck`:
    ```bash
-   git tag v0.1.0 && git push origin main --tags
+   git tag v0.1.0 && git push origin master --tags
    ```
-   La primera vez, ve a GitHub → Packages → `craftdeck` → Package settings y márcalo como **público**.
-3. **Edita `umbrel-store/`**: sustituye `CAMBIAME` por tu usuario de GitHub en `umbrel-app.yml` y `docker-compose.yml`.
-4. **Crea el repo del app store**: sube el contenido de `umbrel-store/` a un repo propio (p. ej. `TUUSUARIO/umbrel-apps`).
-5. **En tu Umbrel**: App Store → ⋯ → *Community App Stores* → pega la URL del repo → Add → instala **CraftDeck**.
-6. Los amigos se conectan a `IP-de-tu-umbrel:25565` (o el puerto del servidor que crees). Para jugar desde fuera de casa, abre el puerto en el router o usa la app de **playit.gg**/**Tailscale**.
+   La primera vez, en GitHub → tu perfil → Packages → `craftdeck` → Package settings → **Change visibility → Public**.
+2. **App store**: la carpeta `umbrel-store/ismaeloul-craftdeck/` vive copiada en [`Ismaeloul/umbrel-app-store`](https://github.com/Ismaeloul/umbrel-app-store). Al cambiar de versión: actualizar `version` en `umbrel-app.yml` y el tag de la imagen en su `docker-compose.yml`.
+3. **En el Umbrel**: si el store ya está añadido, la app aparece/actualiza sola al refrescar; si no, App Store → ⋯ → *Community App Stores* → `https://github.com/Ismaeloul/umbrel-app-store`.
+4. Los amigos se conectan a `IP-del-umbrel:25565` (o el puerto del servidor creado). Para jugar desde fuera de casa, abre el puerto en el router o usa **playit.gg**/**Tailscale**.
 
 ## Estructura
 

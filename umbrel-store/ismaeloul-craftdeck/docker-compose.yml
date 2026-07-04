@@ -1,11 +1,12 @@
 services:
   app_proxy:
     environment:
-      APP_HOST: isma-apps-craftdeck_web_1
+      APP_HOST: ismaeloul-craftdeck_web_1
       APP_PORT: 8449
 
   web:
-    image: ghcr.io/CAMBIAME/craftdeck:latest
+    image: ghcr.io/ismaeloul/craftdeck:0.1.0
+    container_name: ismaeloul-craftdeck_web_1
     restart: on-failure
     stop_grace_period: 1m
     environment:
