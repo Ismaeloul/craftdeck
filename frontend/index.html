@@ -270,12 +270,11 @@
     <section class="section" id="sec-backups">
       <div class="section-head">
         <h2>Backups</h2>
-        <p>Snapshots del mundo · 4.2 GB usados en tu Umbrel</p>
+        <p id="backupsSubtitle">Snapshots del servidor</p>
         <div class="right"><button class="btn primary" id="btnBackup" onclick="makeBackup()"><i data-icon="database" data-size="14"></i> Crear backup</button></div>
       </div>
       <div class="card" style="margin-bottom:14px;">
-        <div class="toggle-row"><div><div class="t-label">Backup automático diario</div><div class="t-sub">Cada día a las 04:00 · conserva los últimos 7</div></div><label class="switch"><input type="checkbox" checked><span class="track"></span><span class="thumb"></span></label></div>
-        <div class="toggle-row"><div><div class="t-label">Backup antes de instalar mods</div><div class="t-sub">Snapshot de seguridad previo a cada cambio</div></div><label class="switch"><input type="checkbox" checked><span class="track"></span><span class="thumb"></span></label></div>
+        <div class="toggle-row"><div><div class="t-label">Backup automático diario</div><div class="t-sub">Cada día a las 04:00 · conserva los últimos 7</div></div><label class="switch"><input type="checkbox" id="bkAuto" checked onchange="toggleBackupAuto(this.checked)"><span class="track"></span><span class="thumb"></span></label></div>
       </div>
       <div class="card" style="padding:10px;"><div id="backupList"></div></div>
     </section>

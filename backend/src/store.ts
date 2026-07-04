@@ -20,6 +20,8 @@ export interface ServerMeta {
   createdAt: string;
   provision: { status: 'creating' | 'ready' | 'error'; log: string[]; error?: string };
   launch?: LaunchSpec;
+  backupAuto?: boolean; // default true
+  backupKeep?: number;  // default 7
 }
 
 const SERVERS_FILE = path.join(DATA_DIR, 'servers.json');

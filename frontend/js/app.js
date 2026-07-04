@@ -176,6 +176,7 @@ function go(id){
   if(id==='world' && typeof loadWorld==='function') loadWorld();
   if(id==='files') loadFiles();
   if(id==='audit') loadAudit();
+  if(id==='backups') loadBackups();
   if(id==='players' && typeof refreshPlayerLists==='function') refreshPlayerLists();
 }
 document.querySelectorAll('.nav-item').forEach(item=>{
@@ -655,36 +656,64 @@ function renderDashTasks(){
 renderEvents(); renderDashTasks();
 
 /* =================== BACKUPS =================== */
+function fmtSize(b){ return b>=1073741824 ? (b/1073741824).toFixed(2)+' GB' : (b/1048576).toFixed(1)+' MB'; }
+function fmtDate(iso){ return new Date(iso).toLocaleString('es-ES',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}); }
+async function loadBackups(){
+  const id = curServerId(); if(!id) return;
+  try { state.backups = await API.get(`/servers/${id}/backups`); } catch { state.backups = []; }
+  renderBackups();
+  const meta = state.servers[state.currentServer]?.meta;
+  document.getElementById('bkAuto').checked = meta ? meta.backupAuto !== false : true;
+  const total = state.backups.reduce((a,b)=>a+b.size,0);
+  document.getElementById('backupsSubtitle').textContent =
+    state.backups.length ? `Snapshots del servidor · ${fmtSize(total)} usados` : 'Snapshots del servidor · todavía no hay ninguno';
+}
 function renderBackups(){
   document.getElementById('backupList').innerHTML = state.backups.map((b,i)=>`
     <div class="row-item" style="animation-delay:${i*0.04}s">
       <div class="row-icon" style="background:var(--info-dim);color:var(--info)">${icon('database',16)}</div>
       <div class="row-body">
         <div class="row-title" style="font-family:var(--mono);font-size:12.5px">${b.name}.zip</div>
-        <div class="row-sub">${b.date} · ${b.size} · ${b.auto?'automático':'manual'}</div>
+        <div class="row-sub">${fmtDate(b.createdAt)} · ${fmtSize(b.size)} · ${b.auto?'automático':'manual'}</div>
       </div>
-      <button class="btn small ghost" onclick="toast('download','Descargando ${b.name}.zip…','info')">${icon('download',13)}</button>
-      <button class="btn small" onclick="toast('refresh','Mundo restaurado desde ${b.name}','warn'); addAudit('refresh','Restauró el backup ${b.name}','warn')">Restaurar</button>
-      <button class="icon-btn red" onclick="deleteBackup(${i})">${icon('trash',13)}</button>
-    </div>`).join('');
+      <a class="btn small ghost" href="/api/servers/${curServerId()}/backups/${b.name}/download" title="Descargar">${icon('download',13)}</a>
+      <button class="btn small" onclick="armAction(this, ()=>restoreBackupUI('${b.name}'))">Restaurar</button>
+      <button class="icon-btn red" onclick="armAction(this, ()=>deleteBackupUI('${b.name}'), '${icon('trash',13).replace(/'/g,"\\'")}')">${icon('trash',13)}</button>
+    </div>`).join('') || '<div class="empty">Sin backups todavía. Crea el primero con el botón de arriba.</div>';
 }
-function deleteBackup(i){ const b=state.backups.splice(i,1)[0]; renderBackups(); toast('trash',`Backup ${b.name} eliminado`,'warn'); }
-function makeBackup(){
+/* doble click de confirmación: el primer click arma el botón, el segundo ejecuta */
+function armAction(btn, fn, restoreHtml){
+  if(btn.dataset.armed){ fn(); return; }
+  btn.dataset.armed = '1';
+  const orig = btn.innerHTML;
+  btn.innerHTML = '¿Seguro?';
+  btn.style.color = 'var(--danger)';
+  setTimeout(()=>{ delete btn.dataset.armed; btn.innerHTML = restoreHtml || orig; btn.style.color=''; }, 3000);
+}
+async function makeBackup(){
   const btn = document.getElementById('btnBackup');
-  btn.disabled=true; btn.textContent='Comprimiendo mundo…';
-  logLine('info','[CraftDeck] Backup manual: save-off, save-all…');
-  toast('database','Creando backup del mundo…','info');
-  setTimeout(()=>{
-    const d = new Date();
-    state.backups.unshift({ name:`manual_${d.toISOString().slice(0,10)}`, size:'1.22 GB', date:'Ahora mismo', auto:false });
-    renderBackups();
-    btn.disabled=false; btn.innerHTML=icon('database',14)+' Crear backup';
-    toast('check','Backup completado: 1.22 GB en 34 s','ok');
-    addAudit('database','Creó un backup manual (1.22 GB)','ok');
-    logLine('info','[CraftDeck] Backup completado (save-on). 1.22 GB');
-  },2600);
+  btn.disabled = true; btn.textContent = 'Comprimiendo…';
+  try {
+    const b = await API.post(`/servers/${curServerId()}/backups`);
+    toast('check',`Backup completado: ${fmtSize(b.size)}`,'ok');
+    loadBackups();
+  } catch(err){ toast('alert', err.message, 'err'); }
+  btn.disabled = false; btn.innerHTML = icon('database',14)+' Crear backup';
 }
-renderBackups();
+async function restoreBackupUI(name){
+  try {
+    await API.post(`/servers/${curServerId()}/backups/${name}/restore`);
+    toast('refresh',`Mundo restaurado desde ${name}`,'warn');
+  } catch(err){ toast('alert', err.message, 'err'); }
+}
+async function deleteBackupUI(name){
+  try { await API.del(`/servers/${curServerId()}/backups/${name}`); toast('trash',`Backup ${name} eliminado`,'warn'); loadBackups(); }
+  catch(err){ toast('alert', err.message, 'err'); }
+}
+async function toggleBackupAuto(on){
+  try { await API.put(`/servers/${curServerId()}/backup-settings`, { auto: on }); toast(on?'check':'x', on?'Backup diario activado':'Backup diario desactivado', on?'ok':'warn'); }
+  catch(err){ toast('alert', err.message, 'err'); }
+}
 
 /* =================== CRASHES =================== */
 function renderCrashes(){

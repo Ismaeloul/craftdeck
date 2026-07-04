@@ -14,10 +14,14 @@ import {
 } from './instance.js';
 import { playerLists, playerAction } from './players.js';
 import {
+  listBackups, makeBackup, restoreBackup, deleteBackup, backupFilePath,
+  scheduleAutoBackups, setBackupBroadcast,
+} from './backups.js';
+import {
   readProperties, writeProperties, listEditableFiles, readEditableFile, writeEditableFile,
 } from './properties.js';
 import {
-  Loader, ServerMeta, listServers, getServer, addServer, removeServer,
+  Loader, ServerMeta, listServers, getServer, addServer, removeServer, updateServer,
   serverDir, nextFreePort, audit, readAudit,
 } from './store.js';
 
@@ -193,6 +197,40 @@ app.put('/api/servers/:id/file', asyncRoute(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// ---- backups ----
+app.get('/api/servers/:id/backups', asyncRoute(async (req, res) => {
+  res.json(await listBackups(req.params.id!));
+}));
+
+app.post('/api/servers/:id/backups', asyncRoute(async (req, res) => {
+  res.status(201).json(await makeBackup(req.params.id!));
+}));
+
+app.post('/api/servers/:id/backups/:name/restore', asyncRoute(async (req, res) => {
+  await restoreBackup(req.params.id!, req.params.name!);
+  res.json({ ok: true });
+}));
+
+app.delete('/api/servers/:id/backups/:name', asyncRoute(async (req, res) => {
+  await deleteBackup(req.params.id!, req.params.name!);
+  res.json({ ok: true });
+}));
+
+app.get('/api/servers/:id/backups/:name/download', asyncRoute(async (req, res) => {
+  res.download(backupFilePath(req.params.id!, req.params.name!));
+}));
+
+app.put('/api/servers/:id/backup-settings', asyncRoute(async (req, res) => {
+  const { auto, keep } = req.body as { auto?: boolean; keep?: number };
+  const meta = await getServer(req.params.id!);
+  if (!meta) { res.status(404).json({ error: 'Servidor no encontrado' }); return; }
+  await updateServer(meta.id, {
+    backupAuto: auto ?? meta.backupAuto,
+    backupKeep: keep !== undefined ? Math.min(Math.max(keep, 1), 30) : meta.backupKeep,
+  });
+  res.json({ ok: true });
+}));
+
 // ---- auditoría ----
 app.get('/api/audit', asyncRoute(async (_req, res) => {
   res.json(await readAudit());
@@ -201,6 +239,8 @@ app.get('/api/audit', asyncRoute(async (_req, res) => {
 app.use(express.static(FRONTEND_DIR));
 
 setBroadcast(broadcast);
+setBackupBroadcast(broadcast);
+scheduleAutoBackups();
 
 httpServer.listen(PORT, () => {
   console.log(`[craftdeck] panel en http://localhost:${PORT}`);
