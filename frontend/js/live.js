@@ -18,9 +18,28 @@ async function loadConsole(){
   } catch { /* servidor recién creado, sin consola aún */ }
 }
 
-function setPlayers(names){
-  state.players = (names||[]).map(n=>({ name:n, op:false, afk:false, time:'—', ping:'—' }));
+function setPlayers(players){
+  state.players = players || [];
   renderPlayers();
+}
+
+async function refreshPlayerLists(){
+  const id = curServerId(); if(!id) return;
+  try {
+    const data = await API.get(`/servers/${id}/players`);
+    state.playerLists = { ops: data.ops, whitelist: data.whitelist, banned: data.banned };
+    state.players = data.online || [];
+    renderPlayers();
+  } catch { /* sin datos aún */ }
+}
+
+function showWhitelist(){
+  const wl = state.playerLists?.whitelist || [];
+  toast('shield', wl.length ? `Whitelist (${wl.length}): ${wl.join(', ')}` : 'La whitelist está vacía', 'info');
+}
+function showBanned(){
+  const b = state.playerLists?.banned || [];
+  toast('ban', b.length ? `Baneados (${b.length}): ${b.map(x=>x.name).join(', ')}` : 'Nadie está baneado', b.length?'warn':'info');
 }
 
 function applyStatus(status){
@@ -39,6 +58,7 @@ async function onServerSwitched(){
     setPlayers(s.runtime.players);
     document.getElementById('statRamMax').textContent = ` / ${(s.memoryMb/1024).toFixed(0)} GB`;
   } catch { /* ignorar */ }
+  refreshPlayerLists();
 }
 
 onWS((msg)=>{

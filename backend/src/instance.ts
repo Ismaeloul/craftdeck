@@ -7,12 +7,14 @@ import { ensureJre } from './java.js';
 export type RunStatus = 'offline' | 'starting' | 'online' | 'stopping';
 type Broadcast = (type: string, payload: unknown) => void;
 
+export interface OnlinePlayer { name: string; joinedAt: number }
+
 interface Instance {
   proc: ChildProcess | null;
   status: RunStatus;
   startedAt: number | null;
   console: string[];
-  players: string[];
+  players: OnlinePlayer[];
 }
 
 const instances = new Map<string, Instance>();
@@ -28,7 +30,7 @@ function inst(id: string): Instance {
   return i;
 }
 
-export function runtimeOf(id: string): { status: RunStatus; players: string[]; uptimeSec: number } {
+export function runtimeOf(id: string): { status: RunStatus; players: OnlinePlayer[]; uptimeSec: number } {
   const i = inst(id);
   return {
     status: i.status,
@@ -52,12 +54,12 @@ function pushLine(id: string, i: Instance, line: string): void {
   }
   let m = line.match(/\]:?\s(\S{1,16}) joined the game/);
   if (m) {
-    if (!i.players.includes(m[1]!)) i.players.push(m[1]!);
+    if (!i.players.some((p) => p.name === m![1])) i.players.push({ name: m[1]!, joinedAt: Date.now() });
     broadcastFn('players', { id, players: i.players });
   }
   m = line.match(/\]:?\s(\S{1,16}) left the game/);
   if (m) {
-    i.players = i.players.filter((p) => p !== m![1]);
+    i.players = i.players.filter((p) => p.name !== m![1]);
     broadcastFn('players', { id, players: i.players });
   }
 }

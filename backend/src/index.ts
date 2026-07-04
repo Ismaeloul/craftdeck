@@ -12,6 +12,7 @@ import { provisionServer } from './provision.js';
 import {
   setBroadcast, runtimeOf, consoleOf, startServer, stopServer, sendCommand, stopAll,
 } from './instance.js';
+import { playerLists, playerAction } from './players.js';
 import {
   Loader, ServerMeta, listServers, getServer, addServer, removeServer,
   serverDir, nextFreePort, audit, readAudit,
@@ -104,6 +105,18 @@ app.post('/api/servers/:id/command', asyncRoute(async (req, res) => {
 
 app.get('/api/servers/:id/console', asyncRoute(async (req, res) => {
   res.json({ lines: consoleOf(req.params.id!) });
+}));
+
+// ---- jugadores ----
+app.get('/api/servers/:id/players', asyncRoute(async (req, res) => {
+  const id = req.params.id!;
+  res.json({ online: runtimeOf(id).players, ...(await playerLists(id)) });
+}));
+
+app.post('/api/servers/:id/players/:name/:action', asyncRoute(async (req, res) => {
+  const { reason } = (req.body ?? {}) as { reason?: string };
+  await playerAction(req.params.id!, req.params.action!, req.params.name!, reason);
+  res.json({ ok: true });
 }));
 
 app.post('/api/servers', asyncRoute(async (req, res) => {

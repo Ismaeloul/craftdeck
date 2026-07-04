@@ -297,42 +297,48 @@ async function sendCommand(){
 }
 
 /* =================== PLAYERS =================== */
+function fmtDur(ms){
+  const m = Math.floor(ms/60000);
+  if(m<1) return 'recién conectado';
+  if(m<60) return `${m} min`;
+  return `${Math.floor(m/60)}h ${String(m%60).padStart(2,'0')}m`;
+}
 function renderPlayers(){
+  const lists = state.playerLists || { ops:[], whitelist:[], banned:[] };
   const list = document.getElementById('playerList');
   if(!state.players.length) list.innerHTML = '<div class="empty">No hay nadie conectado ahora mismo</div>';
-  else list.innerHTML = state.players.map((p,i)=>`
+  else list.innerHTML = state.players.map((p,i)=>{
+    const op = lists.ops.includes(p.name);
+    return `
     <div class="player-row" style="animation-delay:${i*0.05}s">
       <div class="avatar">${p.name[0].toUpperCase()}</div>
       <div class="player-info">
         <div class="player-name">${p.name}
-          ${p.op?'<span class="chip amber">OP</span>':''}
-          ${p.afk?'<span class="chip gray">AFK</span>':''}
+          ${op?'<span class="chip amber">OP</span>':''}
         </div>
-        <div class="player-meta">${p.time} en línea · ${p.ping} ms</div>
+        <div class="player-meta">${fmtDur(Date.now()-p.joinedAt)} en línea</div>
       </div>
       <div class="player-actions">
-        <button class="icon-btn" title="Mensaje privado" onclick="toast('message','Mensaje enviado a ${p.name}','info')">${icon('message',14)}</button>
-        <button class="icon-btn" title="Teleportar al spawn" onclick="toast('crosshair','${p.name} teleportado al spawn','ok')">${icon('crosshair',14)}</button>
-        <button class="icon-btn" title="${p.op?'Quitar OP':'Dar OP'}" onclick="toggleOp(${i})">${icon('crown',14)}</button>
-        <button class="icon-btn red" title="Expulsar" onclick="kickPlayer(${i})">${icon('logout',14)}</button>
-        <button class="icon-btn red" title="Banear" onclick="banPlayer(${i})">${icon('ban',14)}</button>
+        <button class="icon-btn" title="${op?'Quitar OP':'Dar OP'}" onclick="playerAction('${p.name}','${op?'deop':'op'}')">${icon('crown',14)}</button>
+        <button class="icon-btn red" title="Expulsar" onclick="playerAction('${p.name}','kick')">${icon('logout',14)}</button>
+        <button class="icon-btn red" title="Banear" onclick="playerAction('${p.name}','ban')">${icon('ban',14)}</button>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   document.getElementById('navPlayerCount').textContent = state.players.length;
   document.getElementById('statPlayers').textContent = state.players.length;
-  document.getElementById('playersSubtitle').textContent = `${state.players.length} en línea · 12 en whitelist · 1 baneado`;
+  document.getElementById('playersSubtitle').textContent =
+    `${state.players.length} en línea · ${lists.whitelist.length} en whitelist · ${lists.banned.length} baneado${lists.banned.length===1?'':'s'}`;
   document.getElementById('mapPlayerCount').textContent = state.players.length;
 }
-function toggleOp(i){ const p=state.players[i]; p.op=!p.op; renderPlayers();
-  toast('crown', p.op?`${p.name} ahora es operador`:`${p.name} ya no es operador`, p.op?'ok':'warn');
-  addAudit('crown',(p.op?'Dio OP a ':'Quitó OP a ')+p.name,'warn');
-  logLine('info',`[Server] ${p.op?'Opped':'De-opped'} ${p.name}`); }
-function kickPlayer(i){ const p=state.players.splice(i,1)[0]; renderPlayers();
-  toast('logout',`${p.name} expulsado`,'warn'); addAudit('logout','Expulsó a '+p.name,'warn');
-  logLine('warn',`[Server] Kicked ${p.name}`); }
-function banPlayer(i){ const p=state.players.splice(i,1)[0]; renderPlayers();
-  toast('ban',`${p.name} baneado permanentemente`,'err'); addAudit('ban','Baneó a '+p.name,'err');
-  logLine('err',`[Server] Banned ${p.name}`); }
+async function playerAction(name, action){
+  try {
+    await API.post(`/servers/${curServerId()}/players/${encodeURIComponent(name)}/${action}`);
+    const msgs = { op:`${name} ahora es operador`, deop:`${name} ya no es operador`, kick:`${name} expulsado`, ban:`${name} baneado` };
+    toast(action==='ban'?'ban':action==='kick'?'logout':'crown', msgs[action]||name, action==='ban'?'err':action==='kick'?'warn':'ok');
+    setTimeout(()=>{ if(typeof refreshPlayerLists==='function') refreshPlayerLists(); }, 600);
+  } catch(err){ toast('alert', err.message, 'err'); }
+}
 
 /* =================== STATS TABLE =================== */
 const statRows = [
