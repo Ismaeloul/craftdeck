@@ -93,21 +93,7 @@ const state = {
     { ic:'bell', color:'var(--danger)', bg:'var(--danger-dim)', name:'Alerta a Discord si el server se cae', sched:'Al detectar crash', on:true },
     { ic:'trash', color:'var(--muted2)', bg:'rgba(255,255,255,.06)', name:'Purga de items tirados en el suelo', sched:'Cada 30 min', on:true },
   ],
-  crashes: [
-    { id:0, date:'2 jul · 03:12', file:'crash-2026-07-02_03.12.44-server.txt', analyzed:true,
-      culprit:'Phosphor 0.8.1', reason:'Incompatible con Lithium: ambos reemplazan el motor de iluminación y sus mixins chocan.',
-      fix:'Desinstala Phosphor. Lithium ya incluye esas optimizaciones y está mantenido.',
-      stack:`java.lang.IllegalStateException: Mixin apply failed
-  at me.jellysquid.mods.phosphor.mixin.LightEngineMixin
-  <span class="hl">at me.jellysquid.mods.lithium.light.LithiumLightEngine  ← CONFLICTO</span>
-  at net.minecraft.server.MinecraftServer.tick(MinecraftServer.java:912)` },
-    { id:1, date:'28 jun · 21:47', file:'crash-2026-06-28_21.47.03-server.txt', analyzed:true,
-      culprit:'OutOfMemoryError', reason:'El servidor se quedó sin RAM con 7 jugadores explorando chunks nuevos a la vez.',
-      fix:'Sube la RAM asignada de 4 a 6 GB en Configuración, o baja la distancia de renderizado a 8.',
-      stack:`java.lang.OutOfMemoryError: Java heap space
-  <span class="hl">at net.minecraft.world.chunk.ChunkGenerator.generate  ← SIN MEMORIA</span>
-  at net.minecraft.server.world.ServerChunkManager` },
-  ],
+  crashes: [],
   audit: [],
   files: {
     'server.properties': { lang:'PROPERTIES', content:'#Minecraft server properties\n#Fri Jul 04 04:00:12 CET 2026\nmotd=Servidor de Isma \\u2014 powered by Umbrel\nmax-players=20\ndifficulty=normal\ngamemode=survival\npvp=true\nview-distance=10\nspawn-protection=16\nwhite-list=true\nenable-rcon=true\nrcon.port=25575\nlevel-seed=-4172144997902289642\nonline-mode=true' },
@@ -135,18 +121,18 @@ const NAV = [
     { id:'dashboard', label:'Dashboard', ic:'dashboard' },
     { id:'console', label:'Consola', ic:'terminal' },
     { id:'players', label:'Jugadores', ic:'users', badge:'navPlayerCount' },
-    { id:'stats', label:'Estadísticas', ic:'barChart', demo:true },
+    { id:'stats', label:'Estadísticas', ic:'barChart' },
     { id:'map', label:'Mapa en vivo', ic:'map', demo:true },
   ]},
   { group:'CONTENIDO', items:[
-    { id:'mods', label:'Mods', ic:'package', badge:'navModCount', badgeWarn:true, demo:true },
+    { id:'mods', label:'Mods', ic:'package', badge:'navModCount', badgeWarn:true },
     { id:'world', label:'Mundo', ic:'globe' },
     { id:'files', label:'Archivos', ic:'fileCode' },
   ]},
   { group:'OPERACIONES', items:[
     { id:'events', label:'Eventos', ic:'calendar', demo:true },
     { id:'backups', label:'Backups', ic:'database' },
-    { id:'crashes', label:'Diagnóstico', ic:'alert', demo:true },
+    { id:'crashes', label:'Diagnóstico', ic:'alert' },
   ]},
   { group:'SISTEMA', items:[
     { id:'integrations', label:'Integraciones', ic:'share', demo:true },
@@ -178,6 +164,9 @@ function go(id){
   if(id==='files') loadFiles();
   if(id==='audit') loadAudit();
   if(id==='backups') loadBackups();
+  if(id==='stats') loadStats();
+  if(id==='crashes') loadCrashes();
+  if(id==='mods'){ loadInstalledMods(); searchModrinth(document.getElementById('modSearch').value.trim()); }
   if(id==='players' && typeof refreshPlayerLists==='function') refreshPlayerLists();
 }
 document.querySelectorAll('.nav-item').forEach(item=>{
@@ -364,31 +353,86 @@ async function playerAction(name, action){
 }
 
 /* =================== STATS TABLE =================== */
-const statRows = [
-  { n:'Isma_Dev', t:'184 h', d:23, b:'412.8k', m:'8,942', a:'87 / 122' },
-  { n:'xX_Dragon_Xx', t:'156 h', d:67, b:'298.1k', m:'12,405', a:'74 / 122' },
-  { n:'Luna_Craft', t:'121 h', d:12, b:'501.3k', m:'3,211', a:'91 / 122' },
-  { n:'Creeper_Hunter', t:'98 h', d:104, b:'187.6k', m:'15,880', a:'62 / 122' },
-  { n:'Steve_2010', t:'44 h', d:31, b:'92.4k', m:'2,077', a:'38 / 122' },
-];
-document.getElementById('statsBody').innerHTML = statRows.map((r,i)=>`
-  <tr>
-    <td><span class="rank r${i+1}">${i+1}</span></td>
-    <td style="font-weight:600">${r.n}</td>
-    <td>${r.t}</td><td>${r.d}</td><td>${r.b}</td><td>${r.m}</td>
-    <td><span class="chip green">${r.a}</span></td>
-  </tr>`).join('');
+async function loadStats(){
+  const id = curServerId(); if(!id) return;
+  let players = [];
+  try { ({ players } = await API.get(`/servers/${id}/stats`)); } catch { /* sin datos */ }
+  document.getElementById('statsBody').innerHTML = players.map((r,i)=>`
+    <tr>
+      <td><span class="rank r${Math.min(i+1,3)}">${i+1}</span></td>
+      <td style="font-weight:600">${esc(r.name)}</td>
+      <td>${r.playTimeHours} h</td><td>${r.deaths}</td><td>${fmtNum(r.blocksMined)}</td><td>${fmtNum(r.mobKills)}</td>
+      <td><span class="chip green">${r.advancements}</span></td>
+    </tr>`).join('') || '<tr><td colspan="7"><div class="empty">Sin datos todavía: los jugadores tienen que entrar y jugar un rato</div></td></tr>';
+}
 
-/* =================== MODS — API REAL DE MODRINTH =================== */
+/* =================== MODS — MODRINTH REAL =================== */
 const MODRINTH_API = 'https://api.modrinth.com/v2';
-const MC_VERSION = '1.21.1';
-const CONFLICTS = { phosphor: 'lithium' };
 function esc(s){ return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function fmtNum(n){ return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)+'k':String(n); }
+function curLoader(){ return state.servers[state.currentServer]?.meta?.loader; }
+function curGame(){ return state.servers[state.currentServer]?.meta?.mcVersion; }
 function modUpdatesBadge(){
-  const n = state.installed['lithium'] ? 1 : 0; // demo: lithium con update pendiente
+  const n = Object.keys(state.modUpdates||{}).length;
   const b = document.getElementById('navModCount');
   b.textContent = n; b.style.display = n?'':'none';
+}
+
+async function loadInstalledMods(){
+  const id = curServerId(); if(!id) return;
+  try { ({ installed: state.installedMods } = await API.get(`/servers/${id}/mods`)); }
+  catch { state.installedMods = []; }
+  renderInstalledMods();
+  const chip = document.getElementById('modLoaderChip');
+  if(chip) chip.textContent = `${(curLoader()||'').toUpperCase()} ${curGame()||''}`;
+}
+function renderInstalledMods(){
+  const el = document.getElementById('installedMods');
+  const mods = state.installedMods || [];
+  const upd = state.modUpdates || {};
+  if(curLoader()==='vanilla'){
+    el.innerHTML = '<div class="empty">Este servidor es vanilla y no admite mods. Crea un servidor Fabric, Forge o NeoForge para usarlos.</div>';
+    return;
+  }
+  if(!mods.length){ el.innerHTML = '<div class="empty" style="padding:16px">Sin mods instalados. Busca abajo e instala: las dependencias se resuelven solas.</div>'; return; }
+  el.innerHTML = `<div class="mini-label" style="padding:4px 8px 8px">INSTALADOS (${mods.length}) · los cambios se cargan al reiniciar</div>` + mods.map(m=>`
+    <div class="player-row">
+      <div class="avatar" style="color:var(--info)">${icon('package',16)}</div>
+      <div class="player-info">
+        <div class="player-name">${esc(m.name)}
+          ${!m.enabled?'<span class="chip gray">DESACTIVADO</span>':''}
+          ${upd[m.filename]?`<span class="chip amber">HAY ${esc(upd[m.filename])}</span>`:''}
+          ${m.tracked?'':'<span class="chip gray">MANUAL</span>'}
+        </div>
+        <div class="player-meta" style="font-family:var(--mono)">${esc(m.versionNumber||m.filename)}</div>
+      </div>
+      ${upd[m.filename]?`<button class="btn small primary" data-f="${esc(m.filename)}" onclick="updateModUI(this)">Actualizar</button>`:''}
+      <label class="switch" title="Activar / desactivar"><input type="checkbox" ${m.enabled?'checked':''} data-f="${esc(m.filename)}" onchange="toggleModUI(this)"><span class="track"></span><span class="thumb"></span></label>
+      <button class="icon-btn red" data-f="${esc(m.filename)}" onclick="armAction(this, ()=>removeModUI(this))" style="width:auto;padding:0 8px">${icon('trash',13)}</button>
+    </div>`).join('');
+}
+async function toggleModUI(input){
+  try {
+    await API.post(`/servers/${curServerId()}/mods/${encodeURIComponent(input.dataset.f)}/toggle`, { enabled: input.checked });
+    toast(input.checked?'check':'x', `${input.dataset.f} ${input.checked?'activado':'desactivado'} · aplica al reiniciar`, input.checked?'ok':'warn');
+    loadInstalledMods();
+  } catch(err){ input.checked = !input.checked; toast('alert', err.message, 'err'); }
+}
+async function removeModUI(btn){
+  try {
+    await API.del(`/servers/${curServerId()}/mods/${encodeURIComponent(btn.dataset.f)}`);
+    toast('trash', `${btn.dataset.f} eliminado`, 'warn');
+    await loadInstalledMods(); renderModCards();
+  } catch(err){ toast('alert', err.message, 'err'); }
+}
+async function updateModUI(btn){
+  btn.disabled = true; btn.textContent = 'Actualizando…';
+  try {
+    const r = await API.post(`/servers/${curServerId()}/mods/${encodeURIComponent(btn.dataset.f)}/update`);
+    delete state.modUpdates[btn.dataset.f];
+    toast('check', `Actualizado a ${r.version} · se carga al reiniciar`, 'ok');
+    await loadInstalledMods(); modUpdatesBadge();
+  } catch(err){ toast('alert', err.message, 'err'); btn.disabled = false; btn.textContent = 'Actualizar'; }
 }
 let searchTimer = null;
 function onModSearchInput(){
@@ -397,8 +441,11 @@ function onModSearchInput(){
 }
 async function searchModrinth(query){
   const grid = document.getElementById('modGrid');
+  const loader = curLoader(), game = curGame();
+  if(!loader){ grid.innerHTML = ''; return; }
+  if(loader==='vanilla'){ grid.innerHTML = ''; return; }
   grid.innerHTML = '<div class="searching"><span class="spin"></span> Buscando en Modrinth…</div>';
-  const facets = encodeURIComponent(JSON.stringify([["project_type:mod"],["categories:fabric"],[`versions:${MC_VERSION}`]]));
+  const facets = encodeURIComponent(JSON.stringify([["project_type:mod"],[`categories:${loader}`],[`versions:${game}`]]));
   const url = `${MODRINTH_API}/search?query=${encodeURIComponent(query)}&limit=12&index=${query?'relevance':'downloads'}&facets=${facets}`;
   try {
     const res = await fetch(url);
@@ -414,80 +461,55 @@ async function searchModrinth(query){
 function renderModCards(){
   const grid = document.getElementById('modGrid');
   if(!state.lastHits.length){ grid.innerHTML = '<div class="empty" style="grid-column:1/-1">Sin resultados en Modrinth</div>'; return; }
+  const installed = state.installedMods || [];
   grid.innerHTML = state.lastHits.map((m,i)=>{
-    const inst = !!state.installed[m.slug];
-    const off = !!state.disabled[m.slug];
-    const hasUpdate = inst && m.slug==='lithium';
+    const inst = installed.find(x=>x.projectId===m.project_id || (x.slug && x.slug===m.slug));
     return `
     <div class="card mod-card" style="animation-delay:${i*0.04}s">
       <div class="mod-icon">${m.icon_url?`<img src="${esc(m.icon_url)}" alt="" loading="lazy">`:icon('package',20)}</div>
       <div class="mod-body">
         <div class="mod-title">${esc(m.title)}
           ${inst?'<span class="chip green">INSTALADO</span>':''}
-          ${hasUpdate?'<span class="chip amber">ACTUALIZACIÓN</span>':''}
-          ${CONFLICTS[m.slug]&&state.installed[CONFLICTS[m.slug]]?'<span class="chip red">CONFLICTO</span>':''}
         </div>
         <div class="mod-desc">${esc(m.description).slice(0,150)}</div>
         <div class="mod-stats">
           <span>${icon('download',11)} ${fmtNum(m.downloads)}</span>
           <span>${icon('users',11)} ${fmtNum(m.follows)}</span>
-          <span class="chip blue">FABRIC ${MC_VERSION}</span>
+          <span class="chip blue">${(curLoader()||'').toUpperCase()} ${curGame()||''}</span>
         </div>
         <div style="margin-top:12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-          ${inst?`
-            <label class="switch" title="Activar / desactivar"><input type="checkbox" ${off?'':'checked'} onchange="toggleMod(${i})"><span class="track"></span><span class="thumb"></span></label>
-            <button class="btn small danger" onclick="removeMod(${i})">${icon('trash',12)} Quitar</button>
-          `:`
-            <button class="btn small primary" id="install-${m.slug}" onclick="installMod(${i})">${icon('download',12)} Instalar</button>
-          `}
-          <button class="btn small" onclick="downloadJar(${i}, this)" title="Descarga el .jar real para pasárselo a tus amigos">${icon('download',12)} .jar</button>
+          ${inst?'<span style="font-size:11.5px;color:var(--muted)">Gestión en la lista de instalados de arriba</span>'
+            :`<button class="btn small primary" onclick="installModUI(${i}, this)">${icon('download',12)} Instalar</button>`}
+          <button class="btn small" onclick="downloadJar(${i}, this)" title="Descarga el .jar para el cliente de tus amigos">${icon('download',12)} .jar</button>
         </div>
       </div>
     </div>`;
   }).join('');
-  modUpdatesBadge();
 }
-function checkUpdates(){
-  const n = state.installed['lithium']?1:0;
-  toast('refresh', n?`${n} mod tiene una versión nueva disponible`:'Todo está actualizado', n?'warn':'ok');
-}
-function installMod(i){
+async function installModUI(i, btn){
   const m = state.lastHits[i];
-  const rival = CONFLICTS[m.slug];
-  if(rival && state.installed[rival]){
-    toast('alert',`Conflicto detectado: ${m.title} es incompatible con ${rival}. Instalación bloqueada.`,'err');
-    logLine('err',`[CraftDeck] Conflicto de mixins: ${m.slug} ↔ ${rival}. Instalación cancelada.`);
-    addAudit('alert',`Instalación de ${m.title} bloqueada por conflicto con ${rival}`,'err');
-    return;
-  }
-  const btn = document.getElementById('install-'+m.slug);
-  if(btn){ btn.disabled=true; btn.textContent='Instalando…'; }
-  toast('download',`Descargando ${m.title} desde Modrinth… (la copia a /mods es simulada)`,'info');
-  setTimeout(()=>{
-    state.installed[m.slug]=true;
+  btn.disabled = true; btn.textContent = 'Instalando…';
+  try {
+    const r = await API.post(`/servers/${curServerId()}/mods`, { project: m.slug });
+    toast('check', `Instalado: ${r.installed.join(', ')} · se carga al reiniciar`, 'ok');
+    await loadInstalledMods();
     renderModCards();
-    toast('check',`${m.title} instalado. Se cargará al reiniciar.`,'ok');
-    logLine('info',`[CraftDeck] ${m.title} instalado en /mods (backup previo creado)`);
-    addAudit('package',`Instaló ${m.title}`,'ok');
-  },1600);
+  } catch(err){
+    toast('alert', err.message, 'err');
+    btn.disabled = false; btn.innerHTML = icon('download',12)+' Instalar';
+  }
 }
-function removeMod(i){
-  const m = state.lastHits[i];
-  delete state.installed[m.slug]; delete state.disabled[m.slug];
-  renderModCards();
-  toast('trash',`${m.title} eliminado (recuperable 7 días)`,'warn');
-  logLine('warn',`[CraftDeck] ${m.slug} movido a /mods/.trash`);
-  addAudit('trash','Eliminó el mod '+m.title,'warn');
-}
-function toggleMod(i){
-  const m = state.lastHits[i];
-  if(state.disabled[m.slug]) delete state.disabled[m.slug]; else state.disabled[m.slug]=true;
-  const on = !state.disabled[m.slug];
-  toast(on?'check':'x',`${m.title} ${on?'activado':'desactivado'} · aplica al reiniciar`, on?'ok':'warn');
+async function checkUpdates(){
+  try {
+    const { updates } = await API.get(`/servers/${curServerId()}/mods/updates`);
+    state.modUpdates = Object.fromEntries(updates.map(u=>[u.filename, u.latest]));
+    renderInstalledMods(); modUpdatesBadge();
+    toast('refresh', updates.length?`${updates.length} mod(s) tienen versión nueva`:'Todo está actualizado', updates.length?'warn':'ok');
+  } catch(err){ toast('alert', err.message, 'err'); }
 }
 /* ---- descarga real de .jar desde el CDN de Modrinth ---- */
 async function fetchJarFile(slug){
-  const params = `loaders=${encodeURIComponent('["fabric"]')}&game_versions=${encodeURIComponent(`["${MC_VERSION}"]`)}`;
+  const params = `loaders=${encodeURIComponent(JSON.stringify([curLoader()]))}&game_versions=${encodeURIComponent(JSON.stringify([curGame()]))}`;
   const res = await fetch(`${MODRINTH_API}/project/${slug}/version?${params}`);
   if(!res.ok) throw new Error('HTTP '+res.status);
   const versions = await res.json();
@@ -510,12 +532,12 @@ async function downloadJar(i, btn){
     toast('check',`Descargando ${file.filename} (${(file.size/1048576).toFixed(1)} MB)`,'ok');
     addAudit('download','Descargó '+file.filename,'info');
   } catch(err){
-    toast('alert',`No hay .jar de ${m.title} para Fabric ${MC_VERSION}`,'err');
+    toast('alert',`No hay .jar de ${m.title} para ${curLoader()} ${curGame()}`,'err');
   }
   btn.disabled = false; btn.innerHTML = original;
 }
 async function downloadAllForFriends(){
-  const slugs = Object.keys(state.installed);
+  const slugs = (state.installedMods||[]).filter(m=>m.tracked && m.enabled && m.slug).map(m=>m.slug);
   if(!slugs.length){ toast('alert','No tienes mods instalados','warn'); return; }
   toast('download',`Descargando los .jar de tus ${slugs.length} mods… acepta las descargas múltiples si el navegador pregunta`,'info');
   let ok = 0;
@@ -717,42 +739,49 @@ async function toggleBackupAuto(on){
 }
 
 /* =================== CRASHES =================== */
+async function loadCrashes(){
+  const id = curServerId(); if(!id) return;
+  let crashes = [];
+  try { ({ crashes } = await API.get(`/servers/${id}/crashes`)); } catch { /* sin datos */ }
+  state.crashes = crashes;
+  renderCrashes();
+  if(crashes.length) openCrash(0);
+  else document.getElementById('crashDetail').innerHTML = '<div class="empty">Este servidor no tiene crash reports. Larga vida.</div>';
+}
 function renderCrashes(){
   document.getElementById('crashList').innerHTML =
     `<div class="mini-label" style="padding:8px 10px 2px">CRASH REPORTS</div>` +
-    state.crashes.map(c=>`
-    <div class="row-item" style="cursor:pointer; ${state.currentCrash===c.id?'border-color:var(--border-hover);background:var(--card-hover);':''}" onclick="openCrash(${c.id})">
+    (state.crashes.map((c,i)=>`
+    <div class="row-item" style="cursor:pointer; ${state.currentCrash===i?'border-color:var(--border-hover);background:var(--card-hover);':''}" onclick="openCrash(${i})">
       <div class="row-icon" style="background:var(--danger-dim);color:var(--danger)">${icon('alert',15)}</div>
       <div class="row-body">
-        <div class="row-title" style="font-size:12.5px">${c.culprit}</div>
-        <div class="row-sub">${c.date}</div>
+        <div class="row-title" style="font-size:12.5px">${esc(c.culprit)}</div>
+        <div class="row-sub">${fmtDate(c.date)}</div>
       </div>
-      <span class="chip green">ANALIZADO</span>
-    </div>`).join('') +
-    `<div class="empty" style="padding:16px;font-size:12px;">El servidor lleva 2 días sin crashes</div>`;
+    </div>`).join('') || '<div class="empty" style="padding:16px;font-size:12px;">Sin crashes registrados</div>');
 }
-function openCrash(id){
-  state.currentCrash = id;
-  const c = state.crashes.find(x=>x.id===id);
+async function openCrash(i){
+  state.currentCrash = i;
+  const c = state.crashes[i]; if(!c) return;
   renderCrashes();
+  let stack = '';
+  try {
+    const r = await API.get(`/servers/${curServerId()}/crashes/${encodeURIComponent(c.file)}`);
+    stack = r.text.split('\n').slice(0, 45).join('\n');
+  } catch { stack = '(no se pudo leer el reporte)'; }
   document.getElementById('crashDetail').innerHTML = `
     <h3>${icon('alert',15)} Análisis automático</h3>
     <div class="crash-detail">
-      <div style="font-size:15px;font-weight:650;">Culpable: <span style="color:var(--danger)">${c.culprit}</span></div>
+      <div style="font-size:15px;font-weight:650;">Culpable: <span style="color:var(--danger)">${esc(c.culprit)}</span></div>
       <dl class="crash-kv">
-        <dt>Fecha</dt><dd>${c.date}</dd>
-        <dt>Archivo</dt><dd style="font-family:var(--mono);font-size:11.5px">${c.file}</dd>
-        <dt>Qué pasó</dt><dd>${c.reason}</dd>
-        <dt>Solución sugerida</dt><dd style="color:var(--accent)">${c.fix}</dd>
+        <dt>Fecha</dt><dd>${fmtDate(c.date)}</dd>
+        <dt>Archivo</dt><dd style="font-family:var(--mono);font-size:11.5px">${esc(c.file)}</dd>
+        <dt>Qué pasó</dt><dd>${esc(c.reason)}</dd>
+        <dt>Solución sugerida</dt><dd style="color:var(--accent)">${esc(c.fix)}</dd>
       </dl>
-      <pre class="stack">${c.stack}</pre>
-      <div style="display:flex;gap:9px;margin-top:14px;">
-        <button class="btn small primary" onclick="toast('check','Acción aplicada — reinicia para confirmar','ok'); addAudit('check','Aplicó la solución sugerida del crash','ok')">${icon('check',13)} Aplicar solución</button>
-        <button class="btn small" onclick="toast('fileCode','Abriendo reporte completo (demo)','info')">Ver reporte completo</button>
-      </div>
+      <pre class="stack">${esc(stack)}</pre>
     </div>`;
 }
-renderCrashes(); openCrash(0);
 
 /* =================== ACTIVITY FEED =================== */
 

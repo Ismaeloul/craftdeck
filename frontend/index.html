@@ -172,7 +172,7 @@
     <section class="section" id="sec-mods">
       <div class="section-head">
         <h2>Contenido</h2>
-        <p>Loader: <span class="chip blue">FABRIC 1.21.1</span> · fuente: Modrinth · resolución de dependencias activa</p>
+        <p>Loader: <span class="chip blue" id="modLoaderChip">—</span> · fuente: Modrinth · resolución de dependencias activa</p>
       </div>
       <div class="tabs">
         <div class="tab active" data-modtab="mods" onclick="switchModTab('mods')">Mods</div>
@@ -180,10 +180,11 @@
       </div>
 
       <div id="modtab-mods">
+        <div class="card" id="installedMods" style="padding:10px;margin-bottom:16px;"></div>
         <div class="search-bar">
           <div class="search-wrap">
             <i data-icon="search" data-size="15"></i>
-            <input type="text" id="modSearch" placeholder="Buscar en Modrinth (API real)… prueba: sodium, create, voice chat" oninput="onModSearchInput()">
+            <input type="text" id="modSearch" placeholder="Buscar en Modrinth… prueba: sodium, create, voice chat" oninput="onModSearchInput()">
           </div>
           <button class="btn" onclick="checkUpdates()"><i data-icon="refresh" data-size="14"></i> Actualizaciones</button>
           <button class="btn primary" onclick="downloadAllForFriends()"><i data-icon="download" data-size="14"></i> Pack para amigos</button>

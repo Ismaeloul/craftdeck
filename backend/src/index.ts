@@ -21,6 +21,9 @@ import {
 import {
   readProperties, writeProperties, listEditableFiles, readEditableFile, writeEditableFile,
 } from './properties.js';
+import { listMods, installMod, removeMod, toggleMod, checkModUpdates, updateMod } from './mods.js';
+import { playerStats } from './stats.js';
+import { listCrashes, crashText } from './crashes.js';
 import {
   Loader, ServerMeta, listServers, getServer, addServer, removeServer, updateServer,
   serverDir, nextFreePort, audit, readAudit,
@@ -250,6 +253,50 @@ app.post('/api/servers/:id/gamerule', asyncRoute(async (req, res) => {
   announceInGame(req.params.id!, `${label && /^[\wÁÉÍÓÚáéíóúñÑ /]+$/.test(label) ? label : rule} ${value ? 'activado' : 'desactivado'}`);
   await audit('save', `Cambió la regla ${rule} a ${value}`, 'info');
   res.json({ ok: true });
+}));
+
+// ---- mods (Modrinth) ----
+app.get('/api/servers/:id/mods', asyncRoute(async (req, res) => {
+  res.json({ installed: await listMods(req.params.id!) });
+}));
+
+app.post('/api/servers/:id/mods', asyncRoute(async (req, res) => {
+  const { project } = req.body as { project?: string };
+  if (!project || !/^[\w-]+$/.test(project)) { res.status(400).json({ error: 'Proyecto inválido' }); return; }
+  const installed = await installMod(req.params.id!, project);
+  res.status(201).json({ installed });
+}));
+
+app.delete('/api/servers/:id/mods/:filename', asyncRoute(async (req, res) => {
+  await removeMod(req.params.id!, req.params.filename!);
+  res.json({ ok: true });
+}));
+
+app.post('/api/servers/:id/mods/:filename/toggle', asyncRoute(async (req, res) => {
+  const { enabled } = req.body as { enabled?: boolean };
+  await toggleMod(req.params.id!, req.params.filename!, !!enabled);
+  res.json({ ok: true });
+}));
+
+app.get('/api/servers/:id/mods/updates', asyncRoute(async (req, res) => {
+  res.json({ updates: await checkModUpdates(req.params.id!) });
+}));
+
+app.post('/api/servers/:id/mods/:filename/update', asyncRoute(async (req, res) => {
+  res.json({ version: await updateMod(req.params.id!, req.params.filename!) });
+}));
+
+// ---- estadísticas y diagnóstico ----
+app.get('/api/servers/:id/stats', asyncRoute(async (req, res) => {
+  res.json({ players: await playerStats(req.params.id!) });
+}));
+
+app.get('/api/servers/:id/crashes', asyncRoute(async (req, res) => {
+  res.json({ crashes: await listCrashes(req.params.id!) });
+}));
+
+app.get('/api/servers/:id/crashes/:file', asyncRoute(async (req, res) => {
+  res.json({ text: await crashText(req.params.id!, req.params.file!) });
 }));
 
 // ---- editor de archivos ----
