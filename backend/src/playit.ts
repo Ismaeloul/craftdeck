@@ -49,7 +49,7 @@ export async function startPlayit(): Promise<void> {
   const bin = await ensureBinary();
   state.claimUrl = null;
   state.lastLines = [];
-  proc = spawn(bin, ['--secret_path', path.join(PLAYIT_DIR, 'playit.toml')], {
+  proc = spawn(bin, ['--secret-path', path.join(PLAYIT_DIR, 'playit.toml')], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   state.running = true;

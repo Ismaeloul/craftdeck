@@ -922,7 +922,7 @@ function renderPlayit(st){
       <p style="font-size:11.5px;color:var(--muted);margin-top:8px;line-height:1.5;">Abre el enlace, inicia sesión en playit.gg y crea un túnel <b>Minecraft Java</b> hacia el puerto de tu server. La dirección que te den es la que compartes con tus amigos.</p>`;
   } else claim.style.display = 'none';
   const log = document.getElementById('ptLog');
-  if(st.running && st.lastLines?.length){
+  if(st.lastLines?.length){
     log.style.display = '';
     log.textContent = st.lastLines.join('\n');
     log.scrollTop = log.scrollHeight;

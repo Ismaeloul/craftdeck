@@ -2,7 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 
-export const APP_VERSION = '0.2.0';
+export const APP_VERSION = '0.2.1';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
