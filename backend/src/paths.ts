@@ -2,7 +2,7 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 
-export const APP_VERSION = '0.1.3';
+export const APP_VERSION = '0.1.4';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -18,4 +18,5 @@ export const SERVERS_DIR = path.join(DATA_DIR, 'servers');
 export const RUNTIMES_DIR = path.join(DATA_DIR, 'runtimes');
 export const CACHE_DIR = path.join(DATA_DIR, 'cache');
 export const BACKUPS_DIR = path.join(DATA_DIR, 'backups');
+
 

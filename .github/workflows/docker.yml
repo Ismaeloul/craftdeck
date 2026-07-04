@@ -1,8 +1,8 @@
 name: Publicar imagen Docker
 
+# El despliegue en Umbrel no usa esta imagen (el store descarga el código por tag).
+# Se deja solo con disparo manual por si algún día hace falta imagen propia.
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
 
 permissions:
