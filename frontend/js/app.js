@@ -202,7 +202,7 @@ function renderServerMenu(){
       <span class="ss-dot" style="background:${s.status==='online'?'var(--accent)':'var(--danger)'}"></span>
       ${s.name}<small>${s.status==='online'?'en línea':'detenido'}</small>
     </div>`).join('') +
-    `<div class="ss-item" style="color:var(--muted2)" onclick="toast('plus','Asistente de nuevo servidor (demo)','info')">${icon('plus',14)} Crear servidor…</div>`;
+    `<div class="ss-item" style="color:var(--muted2)" onclick="openCreateWizard()">${icon('plus',14)} Crear servidor…</div>`;
 }
 function toggleServerMenu(e){ e.stopPropagation(); document.getElementById('ssMenu').classList.toggle('open'); }
 document.addEventListener('click', ()=>document.getElementById('ssMenu').classList.remove('open'));
