@@ -22,14 +22,13 @@ docker compose up --build
 
 ## Desplegar en el Umbrel
 
-1. **Publicar imagen**: cada tag `vX.Y.Z` dispara GitHub Actions, que construye la imagen multi-arch (amd64 + arm64) y la publica en `ghcr.io/ismaeloul/craftdeck`:
-   ```bash
-   git tag v0.1.0 && git push origin master --tags
-   ```
-   La primera vez, en GitHub → tu perfil → Packages → `craftdeck` → Package settings → **Change visibility → Public**.
-2. **App store**: la carpeta `umbrel-store/ismaeloul-craftdeck/` vive copiada en [`Ismaeloul/umbrel-app-store`](https://github.com/Ismaeloul/umbrel-app-store). Al cambiar de versión: actualizar `version` en `umbrel-app.yml` y el tag de la imagen en su `docker-compose.yml`.
-3. **En el Umbrel**: si el store ya está añadido, la app aparece/actualiza sola al refrescar; si no, App Store → ⋯ → *Community App Stores* → `https://github.com/Ismaeloul/umbrel-app-store`.
-4. Los amigos se conectan a `IP-del-umbrel:25565` (o el puerto del servidor creado). Para jugar desde fuera de casa, abre el puerto en el router o usa **playit.gg**/**Tailscale**.
+La app vive en [`Ismaeloul/umbrel-app-store`](https://github.com/Ismaeloul/umbrel-app-store) → carpeta `ismaeloul-craftdeck/`, con el código embebido (patrón del store: imagen estándar `node:22-bookworm-slim` que hace `npm install` al primer arranque; Umbrel copia la carpeta a `APP_DATA_DIR` al instalar). No hay imagen Docker propia que publicar.
+
+**Para actualizar la app**: copiar `backend/src`, `backend/package*.json`, `backend/tsconfig.json` y `frontend/` de este repo a la carpeta `ismaeloul-craftdeck/` del store, subir el `version` de `umbrel-app.yml` y hacer push. En el Umbrel aparecerá la actualización al refrescar el App Store.
+
+Los amigos se conectan a `IP-del-umbrel:25565` (o el puerto del servidor creado). Para jugar desde fuera de casa, abre el puerto en el router o usa **playit.gg**/**Tailscale**.
+
+> Nota: existe también un `Dockerfile` + workflow de GHCR por si algún día prefieres imagen propia multi-arch, pero el store no lo usa.
 
 ## Estructura
 
