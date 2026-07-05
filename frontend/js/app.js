@@ -154,7 +154,7 @@ function go(id){
   el.classList.add('visible');
   document.getElementById('pageTitle').textContent = titles[id];
   if(id==='map') requestAnimationFrame(drawMapBase);
-  if(id==='world' && typeof loadWorld==='function') loadWorld();
+  if(id==='world' && typeof loadWorld==='function'){ loadWorld(); loadResources(); }
   if(id==='files') loadFiles();
   if(id==='audit') loadAudit();
   if(id==='backups') loadBackups();
@@ -163,7 +163,7 @@ function go(id){
   if(id==='events') loadEvents();
   if(id==='integrations') loadIntegrations();
   if(id==='mods'){ renderModFilters(); loadInstalledMods(); searchModrinth(document.getElementById('modSearch').value.trim(), 0); }
-  if(id==='players' && typeof refreshPlayerLists==='function') refreshPlayerLists();
+  if(id==='players' && typeof refreshPlayerLists==='function'){ refreshPlayerLists().then(()=>renderWhitelist()); loadPlayersExtras(); }
 }
 document.querySelectorAll('.nav-item').forEach(item=>{
   item.addEventListener('click', ()=>go(item.dataset.section));
@@ -345,6 +345,89 @@ async function playerAction(name, action){
     const msgs = { op:`${name} ahora es operador`, deop:`${name} ya no es operador`, kick:`${name} expulsado`, ban:`${name} baneado` };
     toast(action==='ban'?'ban':action==='kick'?'logout':'crown', msgs[action]||name, action==='ban'?'err':action==='kick'?'warn':'ok');
     setTimeout(()=>{ if(typeof refreshPlayerLists==='function') refreshPlayerLists(); }, 600);
+  } catch(err){ toast('alert', err.message, 'err'); }
+}
+
+/* ---- whitelist y cuentas ---- */
+function renderWhitelist(){
+  const wl = state.playerLists?.whitelist || [];
+  const el = document.getElementById('wlList');
+  el.innerHTML = wl.map(n=>`
+    <span class="day-chip on" style="display:inline-flex; align-items:center; gap:7px;">${esc(n)}
+      <a onclick="removeWhitelistName('${esc(n)}')" title="Quitar" style="cursor:pointer; display:flex; opacity:.7;">${icon('x',11)}</a>
+    </span>`).join('') || '<div class="empty" style="padding:6px; font-size:12px;">Lista vacía — añade el primer nick</div>';
+}
+function setWlChip(on){
+  const chip = document.getElementById('wlChip');
+  chip.textContent = on ? 'ACTIVADA' : 'DESACTIVADA';
+  chip.className = 'chip ' + (on ? 'green' : 'gray');
+  document.getElementById('wlToggle').checked = on;
+}
+async function loadPlayersExtras(){
+  const id = curServerId(); if(!id) return;
+  renderWhitelist();
+  try {
+    state.props = await API.get(`/servers/${id}/properties`);
+    setWlChip(state.props['white-list'] === 'true');
+    const premium = state.props['online-mode'] !== 'false';
+    document.getElementById('pmToggle').checked = premium;
+    document.getElementById('pmWarn').style.display = premium ? 'none' : '';
+  } catch { /* server recién creado */ }
+}
+async function addWhitelistName(){
+  const inp = document.getElementById('wlName');
+  const name = inp.value.trim();
+  if(!name) return;
+  try {
+    await API.post(`/servers/${curServerId()}/whitelist`, { name });
+    inp.value = '';
+    toast('shield', `${name} añadido a la whitelist`, 'ok');
+    setTimeout(async ()=>{ await refreshPlayerLists(); renderWhitelist(); }, 500);
+  } catch(err){ toast('alert', err.message, 'err'); }
+}
+async function removeWhitelistName(name){
+  try {
+    await API.del(`/servers/${curServerId()}/whitelist/${encodeURIComponent(name)}`);
+    toast('shield', `${name} quitado de la whitelist`, 'warn');
+    setTimeout(async ()=>{ await refreshPlayerLists(); renderWhitelist(); }, 500);
+  } catch(err){ toast('alert', err.message, 'err'); }
+}
+async function toggleWhitelistEnabled(on){
+  try {
+    const r = await API.put(`/servers/${curServerId()}/properties`, { 'white-list': String(on), 'enforce-whitelist': String(on) });
+    setWlChip(on);
+    toast(on?'shield':'x', on
+      ? (r.appliedLive.length ? 'Whitelist activada — aplicada al momento' : 'Whitelist activada — se aplica al arrancar')
+      : 'Whitelist desactivada — cualquiera puede entrar', on?'ok':'warn');
+  } catch(err){ toast('alert', err.message, 'err'); setWlChip(!on); }
+}
+async function togglePremium(on){
+  try {
+    await API.put(`/servers/${curServerId()}/properties`, { 'online-mode': String(on) });
+    document.getElementById('pmWarn').style.display = on ? 'none' : '';
+    toast(on?'check':'alert', on
+      ? 'Solo cuentas premium — se aplica al reiniciar el servidor'
+      : 'Modo no premium activado — se aplica al reiniciar. Ojo: los nicks dejan de estar verificados', on?'ok':'warn');
+  } catch(err){ toast('alert', err.message, 'err'); }
+}
+
+/* ---- rendimiento (RAM / núcleos) ---- */
+function loadResources(){
+  const meta = state.servers[state.currentServer]?.meta;
+  if(!meta) return;
+  const gb = Math.round((meta.memoryMb || 4096) / 1024);
+  document.getElementById('resRam').value = gb;
+  document.getElementById('resRamVal').textContent = gb;
+  document.getElementById('resCores').value = String(meta.cpuCores || 0);
+}
+async function saveResources(){
+  const memoryMb = parseInt(document.getElementById('resRam').value) * 1024;
+  const cpuCores = parseInt(document.getElementById('resCores').value);
+  try {
+    const r = await API.put(`/servers/${curServerId()}/settings`, { memoryMb, cpuCores });
+    const meta = state.servers[state.currentServer]?.meta;
+    if(meta){ meta.memoryMb = memoryMb; meta.cpuCores = cpuCores; }
+    toast('cpu', `Rendimiento guardado${r.needsRestart ? ' — se aplica al reiniciar' : ''}`, 'ok');
   } catch(err){ toast('alert', err.message, 'err'); }
 }
 

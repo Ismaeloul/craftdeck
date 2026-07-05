@@ -22,6 +22,7 @@ export interface ServerMeta {
   launch?: LaunchSpec;
   backupAuto?: boolean; // default true
   backupKeep?: number;  // default 7
+  cpuCores?: number;    // 0/ausente = todos los núcleos
   discord?: { url: string; onStatus: boolean; onPlayers: boolean; onBackup: boolean; chatMirror: boolean };
 }
 

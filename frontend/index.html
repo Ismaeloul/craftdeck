@@ -120,11 +120,35 @@
         <h2>Jugadores</h2>
         <p id="playersSubtitle"></p>
         <div class="right">
-          <button class="btn small" onclick="showWhitelist()"><i data-icon="shield" data-size="13"></i> Whitelist</button>
           <button class="btn small" onclick="showBanned()"><i data-icon="ban" data-size="13"></i> Baneados</button>
         </div>
       </div>
       <div class="card" style="padding:10px;"><div id="playerList"></div></div>
+      <div class="grid cols-2" style="margin-top:14px; align-items:start;">
+        <div class="card">
+          <h3><i data-icon="shield" data-size="15"></i> Whitelist <span class="chip gray" id="wlChip">DESACTIVADA</span></h3>
+          <div class="toggle-row">
+            <div><div class="t-label">Activar whitelist</div><div class="t-sub">Solo entran los nicks de la lista · se aplica al momento si el server está encendido</div></div>
+            <label class="switch"><input type="checkbox" id="wlToggle" onchange="toggleWhitelistEnabled(this.checked)"><span class="track"></span><span class="thumb"></span></label>
+          </div>
+          <div style="display:flex; gap:8px; margin:12px 0;">
+            <div class="field" style="flex:1; margin:0;"><input type="text" id="wlName" placeholder="Nick exacto del jugador" maxlength="16" onkeydown="if(event.key==='Enter')addWhitelistName()"></div>
+            <button class="btn small primary" onclick="addWhitelistName()"><i data-icon="plus" data-size="13"></i> Añadir</button>
+          </div>
+          <div class="day-chips" id="wlList"></div>
+        </div>
+        <div class="card">
+          <h3><i data-icon="users" data-size="15"></i> Cuentas</h3>
+          <div class="toggle-row">
+            <div><div class="t-label">Solo cuentas premium</div><div class="t-sub">Verifica cada jugador con Mojang · se aplica al reiniciar</div></div>
+            <label class="switch"><input type="checkbox" id="pmToggle" onchange="togglePremium(this.checked)"><span class="track"></span><span class="thumb"></span></label>
+          </div>
+          <p id="pmWarn" style="display:none; font-size:11.5px; color:var(--warn); margin-top:10px; line-height:1.6;">
+            ⚠ Modo no premium: pueden entrar launchers no oficiales, pero cualquiera puede usar el nick de otro
+            (la whitelist se vuelve engañable). Las skins vuelven con el mod <b>SkinRestorer</b>.
+          </p>
+        </div>
+      </div>
     </section>
 
     <!-- ========== STATS ========== -->
@@ -247,6 +271,26 @@
           <h3><i data-icon="sliders" data-size="15"></i> Reglas del juego</h3>
           <div id="gameRules"></div>
         </div>
+      </div>
+      <div class="card" style="margin-top:14px;">
+        <h3><i data-icon="cpu" data-size="15"></i> Rendimiento <span class="hint">se aplica al reiniciar</span></h3>
+        <div class="grid cols-2" style="margin-top:10px;">
+          <div class="field"><label>RAM asignada · <span class="slider-val" id="resRamVal">8</span> GB</label>
+            <div class="slider-row"><input type="range" id="resRam" min="1" max="12" step="1" value="8" oninput="resRamVal.textContent=this.value"></div>
+          </div>
+          <div class="field"><label>Núcleos de CPU</label>
+            <select id="resCores">
+              <option value="0">Todos los núcleos</option>
+              <option value="1">1 núcleo</option>
+              <option value="2">2 núcleos</option>
+              <option value="3">3 núcleos</option>
+              <option value="4">4 núcleos</option>
+              <option value="6">6 núcleos</option>
+              <option value="8">8 núcleos</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn small primary" style="margin-top:8px;" onclick="saveResources()"><i data-icon="save" data-size="13"></i> Guardar rendimiento</button>
       </div>
       <div class="card" style="margin-top:14px; border-color:rgba(248,113,113,.25);">
         <h3 style="color:var(--danger)"><i data-icon="alert" data-size="15"></i> Zona peligrosa</h3>

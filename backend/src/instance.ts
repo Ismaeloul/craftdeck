@@ -73,15 +73,17 @@ function pushLine(id: string, i: Instance, line: string): void {
 }
 
 function launchArgs(meta: ServerMeta): string[] {
-  const mem = `${meta.memoryMb}M`;
+  const jvm = [`-Xmx${meta.memoryMb}M`];
+  // limita cuántos núcleos ve Java (0 o ausente = todos)
+  if (meta.cpuCores && meta.cpuCores > 0) jvm.push(`-XX:ActiveProcessorCount=${meta.cpuCores}`);
   if (meta.launch!.type === 'jar') {
-    return [`-Xmx${mem}`, '-jar', meta.launch!.jar, 'nogui'];
+    return [...jvm, '-jar', meta.launch!.jar, 'nogui'];
   }
   const argsFile = path.join(
     ...meta.launch!.argsDir.split('/'),
     process.platform === 'win32' ? 'win_args.txt' : 'unix_args.txt',
   );
-  return [`-Xmx${mem}`, `@${argsFile}`, 'nogui'];
+  return [...jvm, `@${argsFile}`, 'nogui'];
 }
 
 export async function startServer(id: string): Promise<void> {

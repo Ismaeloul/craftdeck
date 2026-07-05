@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { rm } from 'node:fs/promises';
 import crypto from 'node:crypto';
+import os from 'node:os';
 import path from 'node:path';
 import { FRONTEND_DIR, BACKUPS_DIR, APP_VERSION } from './paths.js';
 import { listVanillaVersions } from './catalog/vanilla.js';
@@ -13,7 +14,7 @@ import { provisionServer } from './provision.js';
 import {
   setBroadcast, runtimeOf, consoleOf, startServer, stopServer, sendCommand, stopAll, announceInGame,
 } from './instance.js';
-import { playerLists, playerAction } from './players.js';
+import { playerLists, playerAction, whitelistAdd, whitelistRemove } from './players.js';
 import {
   listBackups, makeBackup, restoreBackup, deleteBackup, backupFilePath,
   scheduleAutoBackups, setBackupBroadcast,
@@ -194,6 +195,42 @@ app.delete('/api/servers/:id/world', asyncRoute(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// ---- whitelist ----
+app.post('/api/servers/:id/whitelist', asyncRoute(async (req, res) => {
+  const { name } = req.body as { name?: string };
+  if (!name?.trim()) { res.status(400).json({ error: 'Escribe el nick del jugador' }); return; }
+  await whitelistAdd(req.params.id!, name.trim());
+  res.status(201).json({ ok: true });
+}));
+
+app.delete('/api/servers/:id/whitelist/:name', asyncRoute(async (req, res) => {
+  await whitelistRemove(req.params.id!, req.params.name!);
+  res.json({ ok: true });
+}));
+
+// ---- rendimiento (RAM y núcleos, se aplica al reiniciar) ----
+app.put('/api/servers/:id/settings', asyncRoute(async (req, res) => {
+  const { memoryMb, cpuCores } = req.body as { memoryMb?: number; cpuCores?: number };
+  const meta = await getServer(req.params.id!);
+  if (!meta) { res.status(404).json({ error: 'Servidor no encontrado' }); return; }
+  const patch: Partial<ServerMeta> = {};
+  if (memoryMb !== undefined) {
+    if (!Number.isInteger(memoryMb) || memoryMb < 1024 || memoryMb > 16384) { res.status(400).json({ error: 'RAM inválida (1–16 GB)' }); return; }
+    patch.memoryMb = memoryMb;
+  }
+  if (cpuCores !== undefined) {
+    const max = os.cpus().length;
+    if (!Number.isInteger(cpuCores) || cpuCores < 0 || cpuCores > max) { res.status(400).json({ error: `Núcleos inválidos (0–${max})` }); return; }
+    patch.cpuCores = cpuCores;
+  }
+  await updateServer(meta.id, patch);
+  const bits = [];
+  if (patch.memoryMb) bits.push(`${(patch.memoryMb / 1024).toFixed(0)} GB de RAM`);
+  if (patch.cpuCores !== undefined) bits.push(patch.cpuCores === 0 ? 'todos los núcleos' : `${patch.cpuCores} núcleos`);
+  if (bits.length) await audit('cpu', `Ajustó el rendimiento de ${meta.name}: ${bits.join(', ')}`, 'info');
+  res.json({ ok: true, needsRestart: runtimeOf(meta.id).status !== 'offline' });
+}));
+
 // ---- server.properties ----
 app.get('/api/servers/:id/properties', asyncRoute(async (req, res) => {
   res.json(await readProperties(req.params.id!));
@@ -210,6 +247,7 @@ const PROP_LABELS: Record<string, string> = {
   'max-players': 'Máximo de jugadores', 'view-distance': 'Distancia de renderizado',
   'spawn-protection': 'Protección del spawn', pvp: 'PvP', hardcore: 'Hardcore',
   'generate-structures': 'Generar estructuras', 'spawn-monsters': 'Mobs hostiles', 'level-seed': 'Semilla',
+  'online-mode': 'Solo cuentas premium', 'enforce-whitelist': 'Whitelist estricta',
 };
 const VALUE_LABELS: Record<string, string> = {
   peaceful: 'Pacífico', easy: 'Fácil', normal: 'Normal', hard: 'Difícil',
