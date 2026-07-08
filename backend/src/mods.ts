@@ -1,7 +1,7 @@
-import { readFile, writeFile, readdir, rm, rename, mkdir } from 'node:fs/promises';
+import { readFile, readdir, rm, rename, mkdir, access } from 'node:fs/promises';
 import path from 'node:path';
 import { serverDir, getServer, audit } from './store.js';
-import { fetchJson, download } from './util.js';
+import { fetchJson, download, writeFileAtomic } from './util.js';
 
 const MODRINTH = 'https://api.modrinth.com/v2';
 const FILE_RE = /^[A-Za-z0-9._+ '()\[\]-]+\.jar(\.disabled)?$/;
@@ -37,7 +37,7 @@ async function readTracked(id: string): Promise<TrackedMod[]> {
   try { return JSON.parse(await readFile(trackFile(id), 'utf8')); } catch { return []; }
 }
 async function writeTracked(id: string, mods: TrackedMod[]): Promise<void> {
-  await writeFile(trackFile(id), JSON.stringify(mods, null, 2));
+  await writeFileAtomic(trackFile(id), JSON.stringify(mods, null, 2));
 }
 
 async function loaderOf(id: string): Promise<{ loader: string; game: string }> {
@@ -122,8 +122,10 @@ export async function removeMod(id: string, filename: string): Promise<void> {
 
 export async function toggleMod(id: string, filename: string, enabled: boolean): Promise<void> {
   const base = safeModPath(id, filename);
-  if (enabled) await rename(base + '.disabled', base);
-  else await rename(base, base + '.disabled');
+  const target = enabled ? base : base + '.disabled';
+  const source = enabled ? base + '.disabled' : base;
+  try { await access(target); return; } catch { /* aún no está en el estado pedido */ }
+  await rename(source, target);
 }
 
 /** Rutas absolutas de los jars activos, para el pack de amigos. */

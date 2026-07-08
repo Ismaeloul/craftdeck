@@ -12,7 +12,7 @@ import { listForgeVersions } from './catalog/forge.js';
 import { listNeoForgeVersions } from './catalog/neoforge.js';
 import { provisionServer } from './provision.js';
 import {
-  setBroadcast, runtimeOf, consoleOf, startServer, stopServer, sendCommand, stopAll, announceInGame,
+  setBroadcast, runtimeOf, consoleOf, startServer, stopServer, sendCommand, stopAll, announceInGame, assertNotBusy,
 } from './instance.js';
 import { playerLists, playerAction, whitelistAdd, whitelistRemove } from './players.js';
 import {
@@ -169,6 +169,7 @@ app.delete('/api/servers/:id', asyncRoute(async (req, res) => {
     res.status(400).json({ error: 'Confirmación requerida: pasa ?confirm=<nombre del servidor>' });
     return;
   }
+  assertNotBusy(meta.id);
   await stopServer(meta.id);
   await removeServer(meta.id);
   await removeEventsOfServer(meta.id);
@@ -188,6 +189,7 @@ app.delete('/api/servers/:id/world', asyncRoute(async (req, res) => {
     return;
   }
   if (runtimeOf(id).status !== 'offline') { res.status(400).json({ error: 'Detén el servidor antes de borrar el mundo' }); return; }
+  assertNotBusy(id);
   for (const d of ['world', 'world_nether', 'world_the_end']) {
     await rm(path.join(serverDir(id), d), { recursive: true, force: true });
   }
@@ -210,7 +212,7 @@ app.delete('/api/servers/:id/whitelist/:name', asyncRoute(async (req, res) => {
 
 // ---- rendimiento (RAM y núcleos, se aplica al reiniciar) ----
 app.put('/api/servers/:id/settings', asyncRoute(async (req, res) => {
-  const { memoryMb, cpuCores } = req.body as { memoryMb?: number; cpuCores?: number };
+  const { memoryMb, cpuCores, autoRestart } = req.body as { memoryMb?: number; cpuCores?: number; autoRestart?: boolean };
   const meta = await getServer(req.params.id!);
   if (!meta) { res.status(404).json({ error: 'Servidor no encontrado' }); return; }
   const patch: Partial<ServerMeta> = {};
@@ -223,10 +225,12 @@ app.put('/api/servers/:id/settings', asyncRoute(async (req, res) => {
     if (!Number.isInteger(cpuCores) || cpuCores < 0 || cpuCores > max) { res.status(400).json({ error: `Núcleos inválidos (0–${max})` }); return; }
     patch.cpuCores = cpuCores;
   }
+  if (autoRestart !== undefined) patch.autoRestart = !!autoRestart;
   await updateServer(meta.id, patch);
   const bits = [];
   if (patch.memoryMb) bits.push(`${(patch.memoryMb / 1024).toFixed(0)} GB de RAM`);
   if (patch.cpuCores !== undefined) bits.push(patch.cpuCores === 0 ? 'todos los núcleos' : `${patch.cpuCores} núcleos`);
+  if (patch.autoRestart !== undefined) bits.push(patch.autoRestart ? 'auto-reinicio tras crash activado' : 'auto-reinicio tras crash desactivado');
   if (bits.length) await audit('cpu', `Ajustó el rendimiento de ${meta.name}: ${bits.join(', ')}`, 'info');
   res.json({ ok: true, needsRestart: runtimeOf(meta.id).status !== 'offline' });
 }));
@@ -494,9 +498,21 @@ httpServer.listen(PORT, () => {
 });
 
 // parada limpia: detener los servidores antes de salir
+// (el fallback debe superar la escalada de stopServer —75 s— y quedar por debajo
+// del stop_grace_period del compose, 90 s)
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.on(sig, () => {
     void stopAll().then(() => process.exit(0));
-    setTimeout(() => process.exit(0), 35_000).unref();
+    setTimeout(() => process.exit(0), 80_000).unref();
   });
 }
+
+// error fatal: intentar guardar los mundos antes de morir, que el contenedor nos reinicia
+process.on('uncaughtException', (err) => {
+  console.error('[craftdeck] error fatal:', err);
+  void stopAll().finally(() => process.exit(1));
+  setTimeout(() => process.exit(1), 80_000).unref();
+});
+process.on('unhandledRejection', (err) => {
+  console.error('[craftdeck] promesa rechazada sin capturar:', err);
+});

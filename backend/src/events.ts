@@ -1,8 +1,9 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import cron, { type ScheduledTask } from 'node-cron';
 import { DATA_DIR } from './paths.js';
+import { writeFileAtomic } from './util.js';
 import { audit } from './store.js';
 import { runtimeOf, startServer, stopServer, sendCommand, announceInGame } from './instance.js';
 
@@ -35,7 +36,7 @@ async function load(): Promise<EventTask[]> {
 }
 async function persist(): Promise<void> {
   await mkdir(DATA_DIR, { recursive: true });
-  await writeFile(FILE, JSON.stringify(tasks ?? [], null, 2));
+  await writeFileAtomic(FILE, JSON.stringify(tasks ?? [], null, 2));
 }
 
 function toCron(s: Schedule): string {

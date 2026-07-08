@@ -30,7 +30,8 @@ async function flush(): Promise<void> {
       await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: lines.join('\n').slice(0, 1900) }),
+        // allowed_mentions vacío: que nadie pingee @everyone desde el chat del juego
+        body: JSON.stringify({ content: lines.join('\n').slice(0, 1900), allowed_mentions: { parse: [] } }),
       });
     } catch { /* Discord caído o URL mala: no bloquear el server */ }
   }
@@ -42,7 +43,7 @@ async function sendEmbed(url: string, title: string, description: string, color:
     await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ embeds: [{ title, description, color }] }),
+      body: JSON.stringify({ embeds: [{ title, description, color }], allowed_mentions: { parse: [] } }),
     });
   } catch { /* ignorar */ }
 }

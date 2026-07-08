@@ -16,10 +16,19 @@ const API = {
 };
 
 const wsHandlers = [];
+let wsConnectedOnce = false;
 function onWS(fn) { wsHandlers.push(fn); }
 function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen = () => {
+    // tras una reconexión se perdieron eventos: resincronizar estado y consola
+    if (wsConnectedOnce) {
+      if (typeof refreshServers === 'function') refreshServers();
+      if (typeof onServerSwitched === 'function') onServerSwitched();
+    }
+    wsConnectedOnce = true;
+  };
   ws.onmessage = (e) => {
     let msg; try { msg = JSON.parse(e.data); } catch { return; }
     wsHandlers.forEach((f) => f(msg));

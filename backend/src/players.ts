@@ -1,6 +1,7 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { writeFileAtomic } from './util.js';
 import { serverDir, audit } from './store.js';
 import { sendCommand, runtimeOf } from './instance.js';
 import { readProperties } from './properties.js';
@@ -63,7 +64,7 @@ async function premiumUuid(name: string): Promise<string | null> {
 
 async function editWhitelistFile(id: string, mutate: (list: Record<string, string>[]) => Record<string, string>[]): Promise<void> {
   const list = await readJsonList(id, 'whitelist.json');
-  await writeFile(path.join(serverDir(id), 'whitelist.json'), JSON.stringify(mutate(list), null, 2));
+  await writeFileAtomic(path.join(serverDir(id), 'whitelist.json'), JSON.stringify(mutate(list), null, 2));
 }
 
 export async function whitelistAdd(id: string, name: string): Promise<void> {

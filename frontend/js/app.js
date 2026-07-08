@@ -64,49 +64,22 @@ function hydrateIcons(root=document){
 const state = {
   online: false,
   players: [],
-  mods: [
-    { id:'sodium', name:'Sodium', ic:'zap', color:'var(--accent)', bg:'var(--accent-dim)', desc:'Optimización radical del renderizado. Duplica o triplica los FPS.', dl:'38.2M', ver:'0.6.5', installed:true, enabled:true, update:false, deps:[] },
-    { id:'lithium', name:'Lithium', ic:'cpu', color:'var(--info)', bg:'var(--info-dim)', desc:'Optimiza ticks, IA y física del servidor sin cambiar el gameplay.', dl:'21.7M', ver:'0.14.3', installed:true, enabled:true, update:true, deps:[] },
-    { id:'jei', name:'Just Enough Items', ic:'search', color:'var(--warn)', bg:'var(--warn-dim)', desc:'Visor de recetas e items. El imprescindible de todo modpack.', dl:'29.1M', ver:'19.5.0', installed:true, enabled:false, update:false, deps:[] },
-    { id:'create', name:'Create', ic:'settings', color:'var(--danger)', bg:'var(--danger-dim)', desc:'Máquinas, engranajes, trenes y automatización con física preciosa.', dl:'18.4M', ver:'6.0.1', installed:false, enabled:false, update:false, deps:['Fabric API','Flywheel'] },
-    { id:'terralith', name:'Terralith', ic:'map', color:'var(--violet)', bg:'var(--violet-dim)', desc:'Generación de mundo espectacular: +95 biomas sin items nuevos.', dl:'12.9M', ver:'2.5.4', installed:false, enabled:false, update:false, deps:[] },
-    { id:'voicechat', name:'Simple Voice Chat', ic:'wifi', color:'#22d3ee', bg:'rgba(34,211,238,.1)', desc:'Chat de voz por proximidad. Grupos, susurros y más.', dl:'15.3M', ver:'2.5.26', installed:false, enabled:false, update:false, deps:[] },
-    { id:'phosphor', name:'Phosphor', ic:'zap', color:'#facc15', bg:'rgba(250,204,21,.08)', desc:'Optimización del motor de iluminación (proyecto antiguo).', dl:'8.4M', ver:'0.8.1', installed:false, enabled:false, update:false, deps:[], conflicts:'lithium' },
-    { id:'bluemap', name:'BlueMap', ic:'globe', color:'#38bdf8', bg:'rgba(56,189,248,.1)', desc:'Mapa 3D del mundo en el navegador. El que alimenta la pestaña Mapa.', dl:'6.1M', ver:'5.4', installed:false, enabled:false, update:false, deps:[] },
-  ],
-  packs: [
-    { name:'Fabulously Optimized', desc:'Solo rendimiento: FPS altos sin cambiar el juego.', mods:38, dl:'9.2M', grad:'linear-gradient(120deg,#065f46,#0c4a6e)' },
-    { name:'Adrenaline', desc:'Optimización + shaders listos para usar.', mods:52, dl:'3.1M', grad:'linear-gradient(120deg,#7c2d12,#831843)' },
-    { name:'Cobblemon Official', desc:'Pokémon en Minecraft. Sí, en serio.', mods:74, dl:'5.8M', grad:'linear-gradient(120deg,#1e3a8a,#5b21b6)' },
-  ],
-  backups: [
-    { name:'auto_2026-07-04_04-00', size:'1.21 GB', date:'Hoy · 04:00', auto:true },
-    { name:'auto_2026-07-03_04-00', size:'1.19 GB', date:'Ayer · 04:00', auto:true },
-    { name:'pre-mod_lithium', size:'1.18 GB', date:'2 jul · 18:22', auto:true },
-    { name:'manual_antes-del-raid', size:'1.14 GB', date:'30 jun · 21:45', auto:false },
-  ],
+  backups: [],
   events: [],
   crashes: [],
   audit: [],
-  files: {
-    'server.properties': { lang:'PROPERTIES', content:'#Minecraft server properties\n#Fri Jul 04 04:00:12 CET 2026\nmotd=Servidor de Isma \\u2014 powered by Umbrel\nmax-players=20\ndifficulty=normal\ngamemode=survival\npvp=true\nview-distance=10\nspawn-protection=16\nwhite-list=true\nenable-rcon=true\nrcon.port=25575\nlevel-seed=-4172144997902289642\nonline-mode=true' },
-    'whitelist.json': { lang:'JSON', content:'[\n  { "uuid": "af59e3b6-…", "name": "Isma_Dev" },\n  { "uuid": "1b2c8d90-…", "name": "xX_Dragon_Xx" },\n  { "uuid": "9c1f4a77-…", "name": "Creeper_Hunter" },\n  { "uuid": "3e8b2f01-…", "name": "Luna_Craft" }\n]' },
-    'ops.json': { lang:'JSON', content:'[\n  {\n    "uuid": "af59e3b6-…",\n    "name": "Isma_Dev",\n    "level": 4,\n    "bypassesPlayerLimit": true\n  }\n]' },
-    'config/lithium.properties': { lang:'PROPERTIES', content:'# Lithium config\nmixin.ai.pathing=true\nmixin.alloc=true\nmixin.block.hopper=true\nmixin.entity.collisions=true\nmixin.world.tick_scheduler=true' },
-    'config/craftdeck.yml': { lang:'YAML', content:'# CraftDeck panel config\nrcon:\n  host: 127.0.0.1\n  port: 25575\nbackups:\n  keep: 7\n  schedule: "0 4 * * *"\nnotifications:\n  discord: true\n  on_crash: true\n  on_join: false' },
-  },
   servers: [],
-  currentServer: 0,
+  currentServerId: null,
   uptimeSec: 0,
-  tpsHistory: [], cpuHistory: [], ramHistory: [],
+  playersHistory: [], cpuHistory: [], ramHistory: [],
   autoscroll: true,
   currentFile: 'server.properties',
   currentCrash: 0,
-  modTab: 'mods',
-  installed: { 'sodium':'instalado', 'lithium':'instalado', 'jei':'instalado' },
-  disabled: {},
+  modTab: 'explore',
   lastHits: [],
 };
+/* servidor seleccionado, buscado por id (los índices bailan al crear/borrar) */
+function curServer(){ return state.servers.find(s=>s.id===state.currentServerId) || state.servers[0]; }
 
 /* =================== NAV =================== */
 const NAV = [
@@ -162,7 +135,7 @@ function go(id){
   if(id==='crashes') loadCrashes();
   if(id==='events') loadEvents();
   if(id==='integrations') loadIntegrations();
-  if(id==='mods'){ renderModFilters(); loadInstalledMods(); searchModrinth(document.getElementById('modSearch').value.trim(), 0); }
+  if(id==='mods'){ renderModFilters(); loadInstalledMods(); if(state.modTab==='explore') searchModrinth(document.getElementById('modSearch').value.trim(), 0); }
   if(id==='players' && typeof refreshPlayerLists==='function'){ refreshPlayerLists().then(()=>renderWhitelist()); loadPlayersExtras(); }
 }
 document.querySelectorAll('.nav-item').forEach(item=>{
@@ -184,9 +157,9 @@ function renderServerMenu(){
 function toggleServerMenu(e){ e.stopPropagation(); document.getElementById('ssMenu').classList.toggle('open'); }
 document.addEventListener('click', ()=>document.getElementById('ssMenu').classList.remove('open'));
 function pickServer(i){
-  state.currentServer = i;
   const s = state.servers[i];
   if(!s) return;
+  state.currentServerId = s.id;
   document.getElementById('ssName').textContent = s.name;
   document.getElementById('ssSub').textContent = s.sub;
   document.getElementById('ssDot').style.background = s.status==='online'?'var(--accent)':'var(--danger)';
@@ -261,7 +234,8 @@ function setStatus(mode){
   statusDot.className = 'dot '+mode;
   if(mode==='online'){ statusText.textContent='En línea'; state.online=true; btnStart.disabled=true; btnStop.disabled=false; btnRestart.disabled=false; }
   if(mode==='offline'){ statusText.textContent='Detenido'; state.online=false; btnStart.disabled=false; btnStop.disabled=true; btnRestart.disabled=true; }
-  if(mode==='starting'){ statusText.textContent='Arrancando…'; btnStart.disabled=true; btnStop.disabled=true; btnRestart.disabled=true; }
+  // Detener sigue disponible durante el arranque: si se atasca, hay salida
+  if(mode==='starting'){ statusText.textContent='Arrancando…'; btnStart.disabled=true; btnStop.disabled=false; btnRestart.disabled=true; }
 }
 btnStop.onclick = async ()=>{
   try { btnStop.disabled = true; await API.post(`/servers/${curServerId()}/stop`); toast('stop','Servidor detenido','warn'); }
@@ -337,7 +311,6 @@ function renderPlayers(){
   document.getElementById('statPlayers').textContent = state.players.length;
   document.getElementById('playersSubtitle').textContent =
     `${state.players.length} en línea · ${lists.whitelist.length} en whitelist · ${lists.banned.length} baneado${lists.banned.length===1?'':'s'}`;
-  document.getElementById('mapPlayerCount').textContent = state.players.length;
 }
 async function playerAction(name, action){
   try {
@@ -411,22 +384,24 @@ async function togglePremium(on){
   } catch(err){ toast('alert', err.message, 'err'); }
 }
 
-/* ---- rendimiento (RAM / núcleos) ---- */
+/* ---- rendimiento (RAM / núcleos / auto-reinicio) ---- */
 function loadResources(){
-  const meta = state.servers[state.currentServer]?.meta;
+  const meta = curServer()?.meta;
   if(!meta) return;
   const gb = Math.round((meta.memoryMb || 4096) / 1024);
   document.getElementById('resRam').value = gb;
   document.getElementById('resRamVal').textContent = gb;
   document.getElementById('resCores').value = String(meta.cpuCores || 0);
+  document.getElementById('resAutoRestart').checked = meta.autoRestart !== false;
 }
 async function saveResources(){
   const memoryMb = parseInt(document.getElementById('resRam').value) * 1024;
   const cpuCores = parseInt(document.getElementById('resCores').value);
+  const autoRestart = document.getElementById('resAutoRestart').checked;
   try {
-    const r = await API.put(`/servers/${curServerId()}/settings`, { memoryMb, cpuCores });
-    const meta = state.servers[state.currentServer]?.meta;
-    if(meta){ meta.memoryMb = memoryMb; meta.cpuCores = cpuCores; }
+    const r = await API.put(`/servers/${curServerId()}/settings`, { memoryMb, cpuCores, autoRestart });
+    const meta = curServer()?.meta;
+    if(meta){ meta.memoryMb = memoryMb; meta.cpuCores = cpuCores; meta.autoRestart = autoRestart; }
     toast('cpu', `Rendimiento guardado${r.needsRestart ? ' — se aplica al reiniciar' : ''}`, 'ok');
   } catch(err){ toast('alert', err.message, 'err'); }
 }
@@ -449,12 +424,19 @@ async function loadStats(){
 const MODRINTH_API = 'https://api.modrinth.com/v2';
 function esc(s){ return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function fmtNum(n){ return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)+'k':String(n); }
-function curLoader(){ return state.servers[state.currentServer]?.meta?.loader; }
-function curGame(){ return state.servers[state.currentServer]?.meta?.mcVersion; }
+function curLoader(){ return curServer()?.meta?.loader; }
+function curGame(){ return curServer()?.meta?.mcVersion; }
 function modUpdatesBadge(){
   const n = Object.keys(state.modUpdates||{}).length;
   const b = document.getElementById('navModCount');
   b.textContent = n; b.style.display = n?'':'none';
+  const btnAll = document.getElementById('btnUpdateAll');
+  if(btnAll) btnAll.style.display = n ? '' : 'none';
+}
+function installedTabBadge(){
+  const n = (state.installedMods||[]).length;
+  const b = document.getElementById('tabInstalledCount');
+  if(b) b.textContent = n || '';
 }
 
 async function loadInstalledMods(){
@@ -467,14 +449,18 @@ async function loadInstalledMods(){
 }
 function renderInstalledMods(){
   const el = document.getElementById('installedMods');
-  const mods = state.installedMods || [];
   const upd = state.modUpdates || {};
+  installedTabBadge();
   if(curLoader()==='vanilla'){
     el.innerHTML = '<div class="empty">Este servidor es vanilla y no admite mods. Crea un servidor Fabric, Forge o NeoForge para usarlos.</div>';
     return;
   }
-  if(!mods.length){ el.innerHTML = '<div class="empty" style="padding:16px">Sin mods instalados. Busca abajo e instala: las dependencias se resuelven solas.</div>'; return; }
-  el.innerHTML = `<div class="mini-label" style="padding:4px 8px 8px">INSTALADOS (${mods.length}) · los cambios se cargan al reiniciar</div>` + mods.map(m=>`
+  const all = state.installedMods || [];
+  const q = (document.getElementById('installedSearch')?.value || '').trim().toLowerCase();
+  const mods = q ? all.filter(m => (m.name+' '+m.filename).toLowerCase().includes(q)) : all;
+  if(!all.length){ el.innerHTML = '<div class="empty" style="padding:16px">Sin mods instalados. Ve a la pestaña «Explorar», busca e instala: las dependencias se resuelven solas.</div>'; return; }
+  if(!mods.length){ el.innerHTML = `<div class="empty" style="padding:16px">Ningún mod coincide con «${esc(q)}»</div>`; return; }
+  el.innerHTML = `<div class="mini-label" style="padding:4px 8px 8px">${q?`${mods.length} DE ${all.length}`:`INSTALADOS (${all.length})`} · los cambios se cargan al reiniciar</div>` + mods.map(m=>`
     <div class="player-row">
       <div class="avatar" style="color:var(--info)">${icon('package',16)}</div>
       <div class="player-info">
@@ -489,6 +475,25 @@ function renderInstalledMods(){
       <label class="switch" title="Activar / desactivar"><input type="checkbox" ${m.enabled?'checked':''} data-f="${esc(m.filename)}" onchange="toggleModUI(this)"><span class="track"></span><span class="thumb"></span></label>
       <button class="icon-btn red" data-f="${esc(m.filename)}" onclick="armAction(this, ()=>removeModUI(this))" style="width:auto;padding:0 8px">${icon('trash',13)}</button>
     </div>`).join('');
+}
+/* actualizar todos los mods con versión nueva, uno a uno */
+async function updateAllMods(){
+  const files = Object.keys(state.modUpdates||{});
+  if(!files.length) return;
+  const btn = document.getElementById('btnUpdateAll');
+  btn.disabled = true;
+  let ok = 0, fail = 0;
+  for(const f of files){
+    btn.textContent = `Actualizando ${ok+fail+1}/${files.length}…`;
+    try {
+      await API.post(`/servers/${curServerId()}/mods/${encodeURIComponent(f)}/update`);
+      delete state.modUpdates[f];
+      ok++;
+    } catch { fail++; }
+  }
+  btn.disabled = false; btn.innerHTML = icon('refresh',13)+' Actualizar todo';
+  toast(fail?'alert':'check', `${ok} mod(s) actualizados${fail?` · ${fail} fallaron`:''} · se cargan al reiniciar`, fail?'warn':'ok');
+  await loadInstalledMods(); modUpdatesBadge();
 }
 async function toggleModUI(input){
   try {
@@ -618,7 +623,7 @@ function renderModCards(){
           <span class="chip blue">${(curLoader()||'').toUpperCase()} ${curGame()||''}</span>
         </div>
         <div style="margin-top:12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-          ${inst?'<span style="font-size:11.5px;color:var(--muted)">Gestión en la lista de instalados de arriba</span>'
+          ${inst?'<span style="font-size:11.5px;color:var(--muted)">Gestiónalo en la pestaña «Instalados»</span>'
             :`<button class="btn small primary" onclick="installModUI(${i}, this)">${icon('download',12)} Instalar</button>`}
           <button class="btn small" onclick="downloadJar(${i}, this)" title="Descarga el .jar para el cliente de tus amigos">${icon('download',12)} .jar</button>
         </div>
@@ -685,36 +690,10 @@ function downloadFriendsZip(){
 function switchModTab(tab){
   state.modTab = tab;
   document.querySelectorAll('[data-modtab]').forEach(t=>t.classList.toggle('active',t.dataset.modtab===tab));
-  document.getElementById('modtab-mods').style.display = tab==='mods'?'':'none';
-  document.getElementById('modtab-packs').style.display = tab==='packs'?'':'none';
-}
-function renderPacks(){
-  document.getElementById('packGrid').innerHTML = state.packs.map((p,i)=>`
-    <div class="card" style="animation-delay:${i*0.06}s">
-      <div class="pack-banner" style="background:${p.grad}"></div>
-      <div style="font-weight:640; font-size:14.5px;">${p.name}</div>
-      <div style="font-size:12px; color:var(--muted2); margin-top:4px; line-height:1.5;">${p.desc}</div>
-      <div class="mod-stats" style="margin-top:10px;">
-        <span>${icon('package',11)} ${p.mods} mods</span>
-        <span>${icon('download',11)} ${p.dl}</span>
-      </div>
-      <button class="btn small primary" style="margin-top:13px;" onclick="installPack(this,'${p.name}',${p.mods})">${icon('download',12)} Instalar pack</button>
-    </div>`).join('');
-}
-function installPack(btn, name, mods){
-  btn.disabled = true;
-  let n = 0;
-  toast('database','Backup de seguridad previo creado','info');
-  const iv = setInterval(()=>{
-    n += Math.ceil(Math.random()*6);
-    if(n>=mods){
-      clearInterval(iv);
-      btn.textContent = 'Instalado';
-      toast('check',`Modpack «${name}» instalado: ${mods} mods listos`,'ok');
-      addAudit('package',`Instaló el modpack ${name} (${mods} mods)`,'ok');
-      logLine('info',`[CraftDeck] Modpack ${name} desplegado. Reinicia para cargar.`);
-    } else btn.textContent = `Instalando ${Math.min(n,mods)}/${mods}…`;
-  }, 320);
+  document.getElementById('modtab-explore').style.display = tab==='explore'?'':'none';
+  document.getElementById('modtab-installed').style.display = tab==='installed'?'':'none';
+  if(tab==='installed') loadInstalledMods();
+  if(tab==='explore' && !state.lastHits.length) searchModrinth(document.getElementById('modSearch').value.trim(), 0);
 }
 
 /* =================== GAME RULES =================== */
@@ -819,7 +798,7 @@ async function loadEvents(){
   renderEvents(); renderDashTasks();
 }
 function backupTaskRow(){
-  const meta = state.servers[state.currentServer]?.meta;
+  const meta = curServer()?.meta;
   if(!meta) return '';
   const on = meta.backupAuto !== false;
   return `
@@ -836,7 +815,7 @@ function backupTaskRow(){
 async function toggleBackupFromEvents(on){
   try {
     await API.put(`/servers/${curServerId()}/backup-settings`, { auto: on });
-    const meta = state.servers[state.currentServer]?.meta;
+    const meta = curServer()?.meta;
     if(meta) meta.backupAuto = on;
     toast(on?'check':'x', on?'Backup diario activado':'Backup diario desactivado', on?'ok':'warn');
     renderEvents(); renderDashTasks();
@@ -875,7 +854,7 @@ async function deleteEventTask(id){
   } catch(err){ toast('alert', err.message, 'err'); }
 }
 function renderDashTasks(){
-  const meta = state.servers[state.currentServer]?.meta;
+  const meta = curServer()?.meta;
   const items = state.events.filter(e=>e.enabled)
     .sort((a,b)=>new Date(a.next)-new Date(b.next))
     .map(e=>({ m: EV_META[e.type]||EV_META.command, name: evTaskName(e), when: fmtNext(e.next) }));
@@ -943,7 +922,7 @@ function renderDiscordChip(connected){
   document.getElementById('dcOffBtn').style.display = connected ? '' : 'none';
 }
 async function loadIntegrations(){
-  const meta = state.servers[state.currentServer]?.meta;
+  const meta = curServer()?.meta;
   const d = meta?.discord;
   document.getElementById('dcUrl').value = d?.url || '';
   document.getElementById('dcStatus').checked = d ? d.onStatus : true;
@@ -1039,7 +1018,7 @@ async function loadBackups(){
   const id = curServerId(); if(!id) return;
   try { state.backups = await API.get(`/servers/${id}/backups`); } catch { state.backups = []; }
   renderBackups();
-  const meta = state.servers[state.currentServer]?.meta;
+  const meta = curServer()?.meta;
   document.getElementById('bkAuto').checked = meta ? meta.backupAuto !== false : true;
   const total = state.backups.reduce((a,b)=>a+b.size,0);
   document.getElementById('backupsSubtitle').textContent =
@@ -1133,8 +1112,19 @@ async function openCrash(i){
         <dt>Qué pasó</dt><dd>${esc(c.reason)}</dd>
         <dt>Solución sugerida</dt><dd style="color:var(--accent)">${esc(c.fix)}</dd>
       </dl>
+      ${c.culpritFilename?`<div style="display:flex;gap:8px;margin:4px 0 12px;flex-wrap:wrap;">
+        <button class="btn small danger" onclick="armAction(this, ()=>disableCulprit(${i}))">${icon('x',13)} Desactivar «${esc(c.culprit)}»</button>
+        <span style="font-size:11.5px;color:var(--muted);align-self:center;">Se aplica al reiniciar el servidor</span>
+      </div>`:''}
       <pre class="stack">${esc(stack)}</pre>
     </div>`;
+}
+async function disableCulprit(i){
+  const c = state.crashes[i]; if(!c?.culpritFilename) return;
+  try {
+    await API.post(`/servers/${curServerId()}/mods/${encodeURIComponent(c.culpritFilename)}/toggle`, { enabled: false });
+    toast('check', `«${c.culprit}» desactivado — reinicia el servidor para aplicarlo`, 'ok');
+  } catch(err){ toast('alert', err.message, 'err'); }
 }
 
 /* =================== ACTIVITY FEED =================== */
@@ -1175,21 +1165,15 @@ function drawDualChart(canvas,a,b){
 }
 function tickCharts(){
   // el historial lo alimentan los eventos 'metrics' del WebSocket (live.js)
-  [state.tpsHistory,state.cpuHistory,state.ramHistory].forEach(a=>{ if(a.length>90)a.shift(); });
+  [state.playersHistory,state.cpuHistory,state.ramHistory].forEach(a=>{ if(a.length>90)a.shift(); });
   const pad = a => a.length>1 ? a : [0,0];
-  drawChart(document.getElementById('tpsChart'),pad(state.tpsHistory),{min:0,max:20.5,color:'#34d399',fill:'rgba(52,211,153,.18)'});
+  const maxP = Math.max(5, ...state.playersHistory);
+  drawChart(document.getElementById('playersChart'),pad(state.playersHistory),{min:0,max:maxP+1,color:'#34d399',fill:'rgba(52,211,153,.18)'});
   drawDualChart(document.getElementById('cpuChart'),pad(state.cpuHistory),pad(state.ramHistory));
-  const tpsEl = document.getElementById('statTps');
-  tpsEl.textContent = state.online ? '20' : '—';
-  tpsEl.style.color = state.online ? 'var(--accent)' : 'var(--muted)';
 }
 setInterval(tickCharts,1500);
 
-/* =================== MAP =================== */
-const mapPlayers = state.players.map((p,i)=>({
-  name:p.name, x:0.35+Math.random()*0.3, y:0.35+Math.random()*0.3,
-  vx:(Math.random()-0.5)*0.0016, vy:(Math.random()-0.5)*0.0016,
-}));
+/* =================== MAP (placeholder decorativo hasta integrar BlueMap) =================== */
 let mapBase = null;
 function terrainH(x,y){
   return Math.sin(x*0.09)*Math.cos(y*0.075)*1.1
@@ -1243,28 +1227,15 @@ function drawMapFrame(){
   ctx.strokeRect(sx-6,sy-6,12,12);
   ctx.font='10px Inter, Segoe UI'; ctx.fillStyle='rgba(255,255,255,.75)';
   ctx.fillText('spawn', sx+10, sy+3);
-  // players
-  mapPlayers.length = state.players.length;
-  mapPlayers.forEach(p=>{
-    p.x+=p.vx; p.y+=p.vy;
-    if(p.x<0.05||p.x>0.95) p.vx*=-1;
-    if(p.y<0.05||p.y>0.95) p.vy*=-1;
-    if(Math.random()<0.01){ p.vx=(Math.random()-0.5)*0.0016; p.vy=(Math.random()-0.5)*0.0016; }
-    const px=p.x*w, py=p.y*h;
-    ctx.beginPath(); ctx.arc(px,py,9,0,7);
-    ctx.fillStyle='rgba(52,211,153,.25)'; ctx.fill();
-    ctx.beginPath(); ctx.arc(px,py,4,0,7);
-    ctx.fillStyle='#34d399'; ctx.fill();
-    ctx.strokeStyle='#052e1c'; ctx.lineWidth=1.4; ctx.stroke();
-    ctx.font='600 10.5px Inter, Segoe UI';
-    const tw = ctx.measureText(p.name).width;
-    ctx.fillStyle='rgba(9,9,11,.75)';
-    ctx.fillRect(px-tw/2-5, py-24, tw+10, 15);
-    ctx.fillStyle='#e7e7ea';
-    ctx.fillText(p.name, px-tw/2, py-13);
-  });
+  // marca de agua honesta: esto todavía no es tu mundo real
+  ctx.font='700 26px Inter, Segoe UI';
+  const label = 'PRÓXIMAMENTE · terreno de ejemplo';
+  const lw = ctx.measureText(label).width;
+  ctx.fillStyle='rgba(9,9,11,.65)';
+  ctx.fillRect(w/2-lw/2-18, h/2-58, lw+36, 42);
+  ctx.fillStyle='rgba(255,255,255,.85)';
+  ctx.fillText(label, w/2-lw/2, h/2-30);
 }
-setInterval(()=>{ if(document.getElementById('sec-map').classList.contains('visible')) drawMapFrame(); }, 90);
 document.getElementById('mapCanvas').addEventListener('mousemove', e=>{
   const r = e.target.getBoundingClientRect();
   const bx = Math.round((e.clientX-r.left-r.width/2)*4), bz = Math.round((e.clientY-r.top-r.height/2)*4);
@@ -1280,11 +1251,20 @@ setInterval(()=>{
   document.getElementById('statUptime').textContent = state.online?fmt:'—';
 },1000);
 
+/* =================== AUDIT CSV =================== */
+function exportAuditCsv(){
+  if(!state.audit.length){ toast('alert','No hay actividad que exportar','warn'); return; }
+  const cell = v => `"${String(v??'').replace(/"/g,'""')}"`;
+  const csv = ['fecha;tipo;detalle', ...state.audit.map(a=>[a.when,a.type,a.text].map(cell).join(';'))].join('\n');
+  const url = URL.createObjectURL(new Blob(['﻿'+csv], { type:'text/csv;charset=utf-8' }));
+  triggerDownload(url, 'craftdeck-auditoria.csv');
+  setTimeout(()=>URL.revokeObjectURL(url), 5000);
+  toast('download','craftdeck-auditoria.csv exportado','ok');
+}
+
 /* =================== INIT =================== */
 hydrateIcons();
 renderPlayers();
-searchModrinth('');
-renderPacks();
 modUpdatesBadge();
 tickCharts();
 setTimeout(()=>toast('umbrella','Bienvenido a CraftDeck','ok'),700);

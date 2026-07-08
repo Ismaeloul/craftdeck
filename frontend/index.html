@@ -51,13 +51,13 @@
       <div class="grid cols-4" style="margin-bottom:14px;">
         <div class="card">
           <div class="stat-label"><i data-icon="users" data-size="13"></i> Jugadores</div>
-          <div class="stat-value"><span id="statPlayers">4</span><span class="unit"> / 20</span></div>
-          <div class="stat-sub up">Récord hoy: 7</div>
+          <div class="stat-value"><span id="statPlayers">0</span></div>
+          <div class="stat-sub">Conectados ahora mismo</div>
         </div>
         <div class="card">
-          <div class="stat-label"><i data-icon="zap" data-size="13"></i> TPS</div>
-          <div class="stat-value" id="statTps" style="color:var(--accent)">19.9</div>
-          <div class="stat-sub">Ticks por segundo · ideal 20</div>
+          <div class="stat-label"><i data-icon="zap" data-size="13"></i> CPU</div>
+          <div class="stat-value"><span id="statCpu">—</span><span class="unit"> %</span></div>
+          <div class="stat-sub">Uso del proceso Java</div>
         </div>
         <div class="card">
           <div class="stat-label"><i data-icon="cpu" data-size="13"></i> Memoria</div>
@@ -66,15 +66,15 @@
         </div>
         <div class="card">
           <div class="stat-label"><i data-icon="clock" data-size="13"></i> Uptime</div>
-          <div class="stat-value" id="statUptime">02:14:36</div>
+          <div class="stat-value" id="statUptime">—</div>
           <div class="stat-sub">Desde el último reinicio</div>
         </div>
       </div>
 
       <div class="grid cols-2" style="margin-bottom:14px;">
         <div class="card">
-          <h3><i data-icon="activity" data-size="15"></i> Rendimiento TPS <span class="hint">últimos 90 s</span></h3>
-          <canvas class="chart" id="tpsChart"></canvas>
+          <h3><i data-icon="users" data-size="15"></i> Jugadores en línea <span class="hint">últimos minutos</span></h3>
+          <canvas class="chart" id="playersChart"></canvas>
         </div>
         <div class="card">
           <h3><i data-icon="cpu" data-size="15"></i> CPU · RAM <span class="hint">tiempo real</span></h3>
@@ -169,16 +169,11 @@
     <section class="section" id="sec-map">
       <div class="section-head">
         <h2>Mapa en vivo</h2>
-        <p>Overworld · render tipo BlueMap · jugadores en tiempo real</p>
-        <div class="right">
-          <button class="btn small" onclick="toast('map','Render del Nether no disponible en la demo','warn')">Nether</button>
-          <button class="btn small" onclick="toast('map','Render del End no disponible en la demo','warn')">End</button>
-        </div>
+        <p>Próximamente · integración con BlueMap para ver tu mundo real y a los jugadores</p>
       </div>
       <div class="map-wrap">
         <canvas id="mapCanvas"></canvas>
         <div class="map-overlay">
-          <div class="map-chip"><i data-icon="users" data-size="13" style="color:var(--accent)"></i> <span id="mapPlayerCount">4</span> jugadores visibles</div>
           <div class="map-chip"><i data-icon="crosshair" data-size="13" style="color:var(--muted)"></i> <span id="mapCoords" style="font-family:var(--mono)">0, 0</span></div>
         </div>
         <div class="map-legend">
@@ -195,16 +190,19 @@
     <!-- ========== MODS ========== -->
     <section class="section" id="sec-mods">
       <div class="section-head">
-        <h2>Contenido</h2>
-        <p>Loader: <span class="chip blue" id="modLoaderChip">—</span> · fuente: Modrinth · resolución de dependencias activa</p>
+        <h2>Mods</h2>
+        <p>Loader: <span class="chip blue" id="modLoaderChip">—</span> · fuente: Modrinth · dependencias automáticas</p>
+        <div class="right">
+          <button class="btn" onclick="checkUpdates()"><i data-icon="refresh" data-size="14"></i> Buscar actualizaciones</button>
+          <button class="btn primary" onclick="downloadFriendsZip()" title="Descarga un .zip con todos los mods activos del servidor, para el cliente de tus amigos"><i data-icon="download" data-size="14"></i> Pack .zip para amigos</button>
+        </div>
       </div>
       <div class="tabs">
-        <div class="tab active" data-modtab="mods" onclick="switchModTab('mods')">Mods</div>
-        <div class="tab" data-modtab="packs" onclick="switchModTab('packs')">Modpacks</div>
+        <div class="tab active" data-modtab="explore" onclick="switchModTab('explore')"><i data-icon="search" data-size="13"></i> Explorar</div>
+        <div class="tab" data-modtab="installed" onclick="switchModTab('installed')"><i data-icon="package" data-size="13"></i> Instalados <span class="nav-badge" id="tabInstalledCount"></span></div>
       </div>
 
-      <div id="modtab-mods">
-        <div class="card" id="installedMods" style="padding:10px;margin-bottom:16px;"></div>
+      <div id="modtab-explore">
         <div class="search-bar">
           <div class="search-wrap">
             <i data-icon="search" data-size="15"></i>
@@ -217,21 +215,21 @@
             <option value="newest">Más nuevos</option>
             <option value="updated">Recién actualizados</option>
           </select>
-          <button class="btn" onclick="checkUpdates()"><i data-icon="refresh" data-size="14"></i> Actualizaciones</button>
-          <button class="btn primary" onclick="downloadFriendsZip()" title="Descarga un .zip con todos los mods activos del servidor"><i data-icon="download" data-size="14"></i> Pack .zip para amigos</button>
         </div>
         <div id="modFilters" style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:16px;align-items:center;"></div>
         <div class="grid cols-2" id="modGrid"></div>
         <div id="modPager" style="display:flex;gap:6px;align-items:center;justify-content:center;margin-top:18px;flex-wrap:wrap;"></div>
       </div>
 
-      <div id="modtab-packs" style="display:none">
-        <div class="grid cols-3" id="packGrid"></div>
-        <div class="card" style="margin-top:14px;">
-          <h3><i data-icon="upload" data-size="15"></i> Exportar tu combinación actual</h3>
-          <p style="font-size:12.5px;color:var(--muted2);line-height:1.6;">Genera un archivo <span style="font-family:var(--mono);color:var(--text)">.mrpack</span> con tus 3 mods instalados para que tus amigos repliquen el cliente exacto en un click.</p>
-          <button class="btn small primary" style="margin-top:12px;" onclick="toast('download','Exportado: craftdeck-survival.mrpack (3 mods)','ok'); addAudit('download','Exportó el modpack del servidor','info')"><i data-icon="download" data-size="13"></i> Exportar .mrpack</button>
+      <div id="modtab-installed" style="display:none">
+        <div class="search-bar">
+          <div class="search-wrap">
+            <i data-icon="search" data-size="15"></i>
+            <input type="text" id="installedSearch" placeholder="Filtrar tus mods instalados…" oninput="renderInstalledMods()">
+          </div>
+          <button class="btn primary" id="btnUpdateAll" style="display:none" onclick="updateAllMods()"><i data-icon="refresh" data-size="13"></i> Actualizar todo</button>
         </div>
+        <div class="card" id="installedMods" style="padding:10px;"></div>
       </div>
     </section>
 
@@ -289,6 +287,10 @@
               <option value="8">8 núcleos</option>
             </select>
           </div>
+        </div>
+        <div class="toggle-row" style="margin-top:10px;">
+          <div><div class="t-label">Reinicio automático tras crash</div><div class="t-sub">Si el servidor se cae, CraftDeck lo levanta solo (máximo 3 veces en 10 minutos; si entra en bucle, se pausa y te avisa)</div></div>
+          <label class="switch"><input type="checkbox" id="resAutoRestart" checked><span class="track"></span><span class="thumb"></span></label>
         </div>
         <button class="btn small primary" style="margin-top:8px;" onclick="saveResources()"><i data-icon="save" data-size="13"></i> Guardar rendimiento</button>
       </div>
@@ -466,7 +468,7 @@
       <div class="section-head">
         <h2>Auditoría</h2>
         <p>Quién hizo qué desde el panel · útil si compartes el admin</p>
-        <div class="right"><button class="btn small" onclick="toast('download','audit-log.csv exportado','ok')"><i data-icon="download" data-size="13"></i> Exportar CSV</button></div>
+        <div class="right"><button class="btn small" onclick="exportAuditCsv()"><i data-icon="download" data-size="13"></i> Exportar CSV</button></div>
       </div>
       <div class="card" style="padding:8px 6px;"><div id="auditList"></div></div>
     </section>

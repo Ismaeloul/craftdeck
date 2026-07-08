@@ -1,5 +1,5 @@
 import { createWriteStream } from 'node:fs';
-import { mkdir, rename } from 'node:fs/promises';
+import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { spawn } from 'node:child_process';
@@ -18,6 +18,13 @@ export async function download(url: string, dest: string): Promise<void> {
   const tmp = dest + '.part';
   await pipeline(Readable.fromWeb(res.body as never), createWriteStream(tmp));
   await rename(tmp, dest);
+}
+
+/** Escritura atómica (tmp + rename): un corte de luz a mitad no deja el archivo corrupto. */
+export async function writeFileAtomic(file: string, data: string): Promise<void> {
+  const tmp = file + '.tmp';
+  await writeFile(tmp, data);
+  await rename(tmp, file);
 }
 
 export function run(

@@ -47,7 +47,7 @@ async function saveWorld(){
 }
 
 /* =================== ZONA PELIGROSA =================== */
-function curServerName(){ return state.servers[state.currentServer]?.name || ''; }
+function curServerName(){ return curServer()?.name || ''; }
 async function deleteWorld(){
   try {
     await API.del(`/servers/${curServerId()}/world?confirm=${encodeURIComponent(curServerName())}`);
@@ -58,7 +58,7 @@ async function deleteServerUI(){
   try {
     await API.del(`/servers/${curServerId()}?confirm=${encodeURIComponent(curServerName())}`);
     toast('trash','Servidor eliminado por completo','warn');
-    state.currentServer = 0;
+    state.currentServerId = null;
     await refreshServers();
     onServerSwitched();
     go('dashboard');

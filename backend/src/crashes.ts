@@ -10,6 +10,8 @@ export interface CrashInfo {
   culprit: string;
   reason: string;
   fix: string;
+  /** filename del jar en mods/ cuando el culpable es un mod instalado (permite desactivarlo desde el panel) */
+  culpritFilename?: string;
 }
 
 const FILE_RE = /^crash-[\w.-]+\.txt$/;
@@ -36,7 +38,7 @@ function traceSuspects(text: string): string[] {
 }
 
 /** Heurísticas honestas: si no está claro, el culpable es «desconocido». */
-async function analyze(id: string, text: string): Promise<Pick<CrashInfo, 'headline' | 'culprit' | 'reason' | 'fix'>> {
+async function analyze(id: string, text: string): Promise<Pick<CrashInfo, 'headline' | 'culprit' | 'reason' | 'fix' | 'culpritFilename'>> {
   const lines = text.split(/\r?\n/);
   const headline = lines.find((l) => l.trim() && !l.startsWith('---') && !l.startsWith('//') && l.includes('Description:'))
     ?.replace('Description:', '').trim()
@@ -68,7 +70,7 @@ async function analyze(id: string, text: string): Promise<Pick<CrashInfo, 'headl
       const keys = [mod.slug, mod.name, mod.filename].filter((k): k is string => !!k).map(norm);
       if (keys.some((k) => k.length >= 3 && sNorm.length >= 3 && (sNorm.includes(k) || k.includes(sNorm)))) {
         return {
-          headline, culprit: mod.name,
+          headline, culprit: mod.name, culpritFilename: mod.filename,
           reason: `«${mod.name}» aparece directamente en la traza del error (${suspect}).`,
           fix: `Actualiza «${mod.name}» desde la sección Mods (botón de actualizaciones) o desactívalo y reinicia. Si el crash desaparece, era él.`,
         };
@@ -89,7 +91,7 @@ async function analyze(id: string, text: string): Promise<Pick<CrashInfo, 'headl
     const key = norm(mod.slug ?? mod.name);
     if (key.length >= 4 && textNorm.includes(key)) {
       return {
-        headline, culprit: mod.name,
+        headline, culprit: mod.name, culpritFilename: mod.filename,
         reason: `El mod «${mod.name}» aparece en el reporte (señal débil: no está en la traza del error).`,
         fix: `Prueba a desactivar «${mod.name}» en la sección Mods y reinicia. Si el crash desaparece, era él.`,
       };
@@ -116,6 +118,26 @@ export async function listCrashes(id: string): Promise<CrashInfo[]> {
     } catch { /* ilegible: saltar */ }
   }
   return out;
+}
+
+/** Crash report más reciente escrito después de `sinceMs`, ya analizado (o null si no hay). */
+export async function latestCrash(id: string, sinceMs: number): Promise<CrashInfo | null> {
+  let files: string[] = [];
+  try { files = (await readdir(crashDir(id))).filter((f) => FILE_RE.test(f)); } catch { return null; }
+  let best: { file: string; mtime: Date } | null = null;
+  for (const file of files) {
+    try {
+      const st = await stat(path.join(crashDir(id), file));
+      if (st.mtime.getTime() >= sinceMs && (!best || st.mtime > best.mtime)) best = { file, mtime: st.mtime };
+    } catch { /* ilegible: saltar */ }
+  }
+  if (!best) return null;
+  try {
+    const text = await readFile(path.join(crashDir(id), best.file), 'utf8');
+    return { file: best.file, date: best.mtime.toISOString(), ...(await analyze(id, text)) };
+  } catch {
+    return null;
+  }
 }
 
 export async function crashText(id: string, file: string): Promise<string> {

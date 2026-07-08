@@ -99,7 +99,8 @@ async function refreshServers() {
       meta: s,
     }));
     renderServerMenu();
-    const cur = state.servers[state.currentServer] || state.servers[0];
+    if (!state.servers.some((s) => s.id === state.currentServerId)) state.currentServerId = state.servers[0]?.id ?? null;
+    const cur = curServer();
     if (cur) {
       document.getElementById('ssName').textContent = cur.name;
       document.getElementById('ssSub').textContent = cur.sub;

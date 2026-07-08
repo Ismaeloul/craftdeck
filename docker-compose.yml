@@ -2,9 +2,14 @@
 services:
   craftdeck:
     build: .
+    environment:
+      # los cron (backup 04:00, eventos) corren en hora local, no UTC
+      - TZ=${TZ:-Europe/Madrid}
     ports:
       - "8449:8449"
       - "25565-25574:25565-25574"
     volumes:
       - ./docker-data:/data
     restart: unless-stopped
+    # margen para que el backend pare los servers con orden 'stop' (escalada hasta 75 s)
+    stop_grace_period: 90s

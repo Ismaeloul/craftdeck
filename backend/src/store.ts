@@ -1,6 +1,7 @@
-import { readFile, writeFile, mkdir, appendFile } from 'node:fs/promises';
+import { readFile, mkdir, appendFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { DATA_DIR, SERVERS_DIR } from './paths.js';
+import { writeFileAtomic } from './util.js';
 
 export type Loader = 'vanilla' | 'fabric' | 'forge' | 'neoforge';
 
@@ -23,6 +24,7 @@ export interface ServerMeta {
   backupAuto?: boolean; // default true
   backupKeep?: number;  // default 7
   cpuCores?: number;    // 0/ausente = todos los núcleos
+  autoRestart?: boolean; // default true — watchdog: reinicia solo tras un crash
   discord?: { url: string; onStatus: boolean; onPlayers: boolean; onBackup: boolean; chatMirror: boolean };
 }
 
@@ -43,7 +45,7 @@ async function load(): Promise<ServerMeta[]> {
 
 async function persist(): Promise<void> {
   await mkdir(DATA_DIR, { recursive: true });
-  await writeFile(SERVERS_FILE, JSON.stringify(servers ?? [], null, 2));
+  await writeFileAtomic(SERVERS_FILE, JSON.stringify(servers ?? [], null, 2));
 }
 
 export async function listServers(): Promise<ServerMeta[]> {
@@ -81,13 +83,21 @@ export function serverDir(id: string): string {
 
 export async function nextFreePort(): Promise<number> {
   const used = new Set((await load()).map((s) => s.port));
-  for (let p = 25565; p < 25600; p++) if (!used.has(p)) return p;
-  throw new Error('Sin puertos libres en el rango 25565-25599');
+  // el compose de Umbrel solo mapea 25565-25574: no repartir puertos inalcanzables
+  for (let p = 25565; p <= 25574; p++) if (!used.has(p)) return p;
+  throw new Error('Sin puertos libres (máximo 10 servidores en el rango 25565-25574)');
 }
 
 export async function audit(action: string, detail: string, level: 'info' | 'warn' | 'err' | 'ok' = 'info'): Promise<void> {
   await mkdir(DATA_DIR, { recursive: true });
   await appendFile(AUDIT_FILE, JSON.stringify({ at: new Date().toISOString(), action, detail, level }) + '\n');
+  try {
+    // rotación: que el log no crezca sin límite en el disco del Umbrel
+    if ((await stat(AUDIT_FILE)).size > 512 * 1024) {
+      const lines = (await readFile(AUDIT_FILE, 'utf8')).trim().split('\n');
+      await writeFileAtomic(AUDIT_FILE, lines.slice(-400).join('\n') + '\n');
+    }
+  } catch { /* rotación best-effort */ }
 }
 
 export async function readAudit(limit = 60): Promise<{ at: string; action: string; detail: string; level: string }[]> {

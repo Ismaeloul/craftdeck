@@ -1,5 +1,5 @@
 /* =================== LIVE: consola, estado y métricas reales =================== */
-function curServerId(){ return state.servers[state.currentServer]?.id; }
+function curServerId(){ return curServer()?.id; }
 
 function classifyLine(line){
   if(line.startsWith('> ')) return 'cmd';
@@ -48,7 +48,7 @@ function applyStatus(status){
 }
 
 async function onServerSwitched(){
-  state.tpsHistory=[]; state.cpuHistory=[]; state.ramHistory=[];
+  state.playersHistory=[]; state.cpuHistory=[]; state.ramHistory=[];
   await loadConsole();
   const id = curServerId(); if(!id){ setStatus('offline'); setPlayers([]); return; }
   try {
@@ -81,7 +81,12 @@ onWS((msg)=>{
       if(msg.status==='online') toast('check','Servidor en línea','ok');
       if(msg.status==='offline'){
         state.uptimeSec = 0; setPlayers([]);
-        if(msg.crashed) toast('alert','El servidor se cerró inesperadamente — mira la consola','err');
+        if(msg.crashed){
+          let t = 'El servidor se cerró inesperadamente';
+          if(msg.culprit && msg.culprit!=='Desconocido') t += ` · culpable probable: ${msg.culprit}`;
+          t += msg.willRestart ? ` · reinicio automático en marcha (${msg.attempt}/${msg.maxAttempts})` : ' — mira Diagnóstico';
+          toast('alert', t, 'err');
+        }
       }
       refreshServers();
       break;
@@ -91,10 +96,11 @@ onWS((msg)=>{
     case 'metrics': {
       state.uptimeSec = msg.uptimeSec;
       state.cpuHistory.push(Math.min(100, msg.cpu));
-      const meta = state.servers[state.currentServer]?.meta;
+      const meta = curServer()?.meta;
       const memPct = meta ? Math.min(100, (msg.memMb / meta.memoryMb) * 100) : 0;
       state.ramHistory.push(memPct);
-      state.tpsHistory.push(state.online ? 20 : 0);
+      state.playersHistory.push(msg.players || 0);
+      document.getElementById('statCpu').textContent = Math.round(msg.cpu);
       document.getElementById('statRam').textContent = (msg.memMb/1024).toFixed(1);
       const ramBar = document.getElementById('ramBar');
       ramBar.style.width = memPct + '%';

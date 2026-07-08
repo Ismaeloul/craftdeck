@@ -16,11 +16,11 @@ const archiver = createRequire(import.meta.url)('archiver') as (format: 'zip', o
 export function createZip(): Archive {
   return archiver('zip', { zlib: { level: 6 } });
 }
+import extractZip from 'extract-zip';
 import cron from 'node-cron';
 import { BACKUPS_DIR } from './paths.js';
-import { run } from './util.js';
 import { listServers, getServer, serverDir, audit } from './store.js';
-import { runtimeOf, sendCommand } from './instance.js';
+import { runtimeOf, sendCommand, waitForLine, lockOp, unlockOp, assertNotBusy } from './instance.js';
 import { discordEvent } from './discord.js';
 
 // no tiene sentido meter en el zip lo que se puede volver a descargar
@@ -56,13 +56,18 @@ export async function makeBackup(id: string, auto = false): Promise<BackupInfo> 
   const meta = await getServer(id);
   if (!meta) throw new Error('Servidor no encontrado');
   if (inProgress.has(id)) throw new Error('Ya hay un backup en curso');
+  assertNotBusy(id); // p. ej. mientras se restaura otro backup
   inProgress.add(id);
+  let saveOff = false;
   try {
     const running = runtimeOf(id).status === 'online';
     if (running) {
       sendCommand(id, 'save-off');
+      saveOff = true;
       sendCommand(id, 'save-all flush');
-      await new Promise((r) => setTimeout(r, 3000)); // dar tiempo a que el server escriba los chunks
+      // esperar a que el server confirme el guardado (los mundos grandes tardan más de 3 s)
+      const saved = await waitForLine(id, /Saved the game/i, 60_000);
+      if (!saved) await new Promise((r) => setTimeout(r, 3000)); // sin confirmación: margen extra
     }
     const stamp = new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-');
     const name = `${auto ? 'auto' : 'manual'}_${stamp}`;
@@ -83,13 +88,14 @@ export async function makeBackup(id: string, auto = false): Promise<BackupInfo> 
       void archive.finalize();
     });
 
-    if (running) sendCommand(id, 'save-on');
     const st = await stat(dest);
     await audit('database', `Creó un backup de ${meta.name} (${(st.size / 1048576).toFixed(1)} MB)`, 'ok');
     void discordEvent(id, 'backup', `${name}.zip · ${(st.size / 1048576).toFixed(1)} MB`);
     broadcastFn('backup', { id, name });
     return { name, size: st.size, createdAt: st.mtime.toISOString(), auto };
   } finally {
+    // pase lo que pase, el server no puede quedarse con el autoguardado apagado
+    if (saveOff) { try { sendCommand(id, 'save-on'); } catch { /* el server ya no está en marcha */ } }
     inProgress.delete(id);
   }
 }
@@ -105,13 +111,19 @@ export async function restoreBackup(id: string, name: string): Promise<void> {
   if (runtimeOf(id).status !== 'offline') throw new Error('Detén el servidor antes de restaurar');
   const zip = safeBackupPath(id, name);
   await stat(zip); // valida que existe
-  // borrar los mundos actuales para que el restore sea limpio
-  for (const dir of ['world', 'world_nether', 'world_the_end']) {
-    await rm(path.join(serverDir(id), dir), { recursive: true, force: true });
+  // bloquea arrancar/backup/borrar mientras el mundo está a medio extraer
+  lockOp(id, 'restaurando un backup');
+  try {
+    // borrar los mundos actuales para que el restore sea limpio
+    for (const dir of ['world', 'world_nether', 'world_the_end']) {
+      await rm(path.join(serverDir(id), dir), { recursive: true, force: true });
+    }
+    // extract-zip, no `tar`: el GNU tar del contenedor Debian no sabe abrir ZIPs
+    await extractZip(zip, { dir: serverDir(id) });
+    await audit('refresh', `Restauró el backup ${name} en ${meta.name}`, 'warn');
+  } finally {
+    unlockOp(id);
   }
-  const code = await run('tar', ['-xf', zip, '-C', serverDir(id)]);
-  if (code !== 0) throw new Error(`Fallo extrayendo el backup (tar exit ${code})`);
-  await audit('refresh', `Restauró el backup ${name} en ${meta.name}`, 'warn');
 }
 
 export async function deleteBackup(id: string, name: string): Promise<void> {
