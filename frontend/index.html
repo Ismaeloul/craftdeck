@@ -53,11 +53,23 @@
       <div class="card addr-card" id="addrCard">
         <div class="addr-icon"><i data-icon="link" data-size="20"></i></div>
         <div class="addr-body">
-          <div class="addr-label">Dirección para tus amigos</div>
+          <div class="addr-label" id="addrLabel">Dirección para tus amigos</div>
           <div class="addr-value" id="addrValue">—</div>
-          <div class="addr-hint" id="addrHint">Sirve dentro de tu red (wifi de casa). Desde fuera: activa el túnel de <a onclick="go('integrations')">playit.gg</a> o abre el puerto en tu router.</div>
+          <div class="addr-hint" id="addrHint"></div>
+          <div id="addrEditor" style="display:none;margin-top:10px;">
+            <div class="field"><label>Dominio o IP pública y puerto de tu router <span style="font-weight:400;color:var(--muted)">· lo que abre la redirección hacia el puerto del servidor</span></label>
+              <input type="text" id="addrInput" placeholder="micasa.freeboxos.fr:49152" maxlength="260" onkeydown="if(event.key==='Enter')savePublicAddress(); if(event.key==='Escape')toggleAddrEditor(false)"></div>
+            <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+              <button class="btn small primary" onclick="savePublicAddress()"><i data-icon="save" data-size="13"></i> Guardar</button>
+              <button class="btn small ghost" onclick="toggleAddrEditor(false)">Cancelar</button>
+              <button class="btn small ghost" id="addrClear" onclick="clearPublicAddress()" style="color:var(--danger)">Quitar dirección pública</button>
+            </div>
+          </div>
         </div>
-        <button class="btn" id="addrCopy" onclick="copyAddress()"><i data-icon="copy" data-size="14"></i> Copiar</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn" id="addrEdit" onclick="toggleAddrEditor()" title="Configurar la dirección con la que entran desde fuera de casa"><i data-icon="settings" data-size="14"></i> Desde fuera</button>
+          <button class="btn primary" id="addrCopy" onclick="copyAddress()"><i data-icon="copy" data-size="14"></i> Copiar</button>
+        </div>
       </div>
       <div class="grid cols-4" style="margin-bottom:14px;">
         <div class="card">
@@ -410,7 +422,14 @@
         <div class="right"><button class="btn primary" id="btnBackup" onclick="makeBackup()"><i data-icon="database" data-size="14"></i> Crear backup</button></div>
       </div>
       <div class="card" style="margin-bottom:14px;">
-        <div class="toggle-row"><div><div class="t-label">Backup automático diario</div><div class="t-sub">Cada día a las 04:00 · conserva los últimos 7</div></div><label class="switch"><input type="checkbox" id="bkAuto" checked onchange="toggleBackupAuto(this.checked)"><span class="track"></span><span class="thumb"></span></label></div>
+        <div class="toggle-row"><div><div class="t-label">Backup automático diario</div><div class="t-sub">Cada día a las 04:00, en hora local</div></div><label class="switch"><input type="checkbox" id="bkAuto" checked onchange="toggleBackupAuto(this.checked)"><span class="track"></span><span class="thumb"></span></label></div>
+        <div class="toggle-row">
+          <div><div class="t-label">Conservar solo las últimas copias automáticas</div><div class="t-sub" id="bkKeepSub">Al hacer una nueva se borra la más antigua que sobre, para que no se coma el disco. Las manuales no se tocan.</div></div>
+          <select id="bkKeep" onchange="changeBackupKeep(parseInt(this.value))" style="width:auto;min-width:130px;background:var(--bg2);border:1px solid var(--border);border-radius:9px;padding:9px 12px;color:var(--text);font-size:13px;font-family:inherit;outline:none;">
+            <option value="1">1 copia</option><option value="3">3 copias</option><option value="5">5 copias</option><option value="7">7 copias</option>
+            <option value="10">10 copias</option><option value="14">14 copias</option><option value="30">30 copias</option>
+          </select>
+        </div>
       </div>
       <div class="card" style="padding:10px;"><div id="backupList"></div></div>
     </section>

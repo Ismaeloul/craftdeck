@@ -135,11 +135,14 @@ export function backupFilePath(id: string, name: string): string {
   return safeBackupPath(id, name);
 }
 
-async function pruneAuto(id: string, keep: number): Promise<void> {
+/** Borra las copias automáticas más antiguas que sobren; devuelve cuántas quitó. */
+export async function pruneAuto(id: string, keep: number): Promise<number> {
   const autos = (await listBackups(id)).filter((b) => b.auto);
-  for (const old of autos.slice(keep)) {
-    await rm(path.join(backupDir(id), `${old.name}.zip`), { force: true });
+  const old = autos.slice(keep);
+  for (const b of old) {
+    await rm(path.join(backupDir(id), `${b.name}.zip`), { force: true });
   }
+  return old.length;
 }
 
 // backup automático diario a las 04:00 para los servers que lo tengan activado

@@ -28,6 +28,7 @@ export interface ServerMeta {
   desiredRunning?: boolean; // estaba encendido la última vez (lo mantiene instance.ts)
   autoStart?: boolean; // default true — volver a arrancarlo solo tras reiniciar el Umbrel / CraftDeck
   aikarFlags?: boolean; // default true — flags de JVM de Aikar (G1GC afinado)
+  publicAddress?: string; // «dominio:puerto» con el que entran los amigos desde fuera (redirección del router, playit…)
   discord?: { url: string; onStatus: boolean; onPlayers: boolean; onBackup: boolean; chatMirror: boolean };
 }
 

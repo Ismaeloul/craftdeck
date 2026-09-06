@@ -180,16 +180,57 @@ function pickServer(i){
 }
 
 /* =================== DIRECCIÓN PARA AMIGOS =================== */
+/* el navegador ya está hablando con el Umbrel: su host es la dirección de la red local */
+function lanAddress(){
+  const s = curServer();
+  return s ? `${location.hostname}:${s.meta.port}` : '';
+}
+/* la que se enseña y se copia: la pública si está configurada (redirección del router, playit…) */
 function serverAddress(){
   const s = curServer();
   if(!s) return '';
-  // el navegador ya está hablando con el Umbrel: su host es la dirección de la red local
-  return `${location.hostname}:${s.meta.port}`;
+  return s.meta.publicAddress || lanAddress();
 }
 function renderAddress(){
   const s = curServer();
+  const pub = s?.meta?.publicAddress;
+  document.getElementById('addrLabel').textContent = pub ? 'Dirección para tus amigos (desde fuera)' : 'Dirección para tus amigos (en casa)';
   document.getElementById('addrValue').textContent = s ? serverAddress() : 'Crea un servidor para verla';
+  document.getElementById('addrHint').innerHTML = !s ? '' : pub
+    ? `En tu red local también vale <span style="font-family:var(--mono)">${esc(lanAddress())}</span>. Recuerda que la redirección del router debe apuntar al puerto ${s.meta.port} del Umbrel.`
+    : `Solo sirve dentro de tu red (wifi de casa). Si tienes una redirección de puertos en el router o un túnel de <a onclick="go('integrations')">playit.gg</a>, pulsa «Desde fuera» y pon la dirección pública.`;
   document.getElementById('addrCopy').disabled = !s;
+  document.getElementById('addrEdit').disabled = !s;
+  document.getElementById('addrClear').style.display = pub ? '' : 'none';
+  toggleAddrEditor(false);
+}
+function toggleAddrEditor(show){
+  const ed = document.getElementById('addrEditor');
+  const open = show !== undefined ? show : ed.style.display === 'none';
+  ed.style.display = open ? '' : 'none';
+  if(open){
+    const inp = document.getElementById('addrInput');
+    inp.value = curServer()?.meta?.publicAddress || '';
+    inp.focus();
+  }
+}
+async function savePublicAddress(){
+  const publicAddress = document.getElementById('addrInput').value.trim();
+  if(!publicAddress){ toast('alert','Escribe la dirección pública (dominio-o-IP:puerto)','warn'); return; }
+  try {
+    await API.put(`/servers/${curServerId()}/address`, { publicAddress });
+    const meta = curServer()?.meta; if(meta) meta.publicAddress = publicAddress;
+    renderAddress();
+    toast('check', `Tus amigos entran por ${publicAddress}`, 'ok');
+  } catch(err){ toast('alert', err.message, 'err'); }
+}
+async function clearPublicAddress(){
+  try {
+    await API.put(`/servers/${curServerId()}/address`, { publicAddress: '' });
+    const meta = curServer()?.meta; if(meta) delete meta.publicAddress;
+    renderAddress();
+    toast('x', 'Dirección pública quitada — se muestra la de casa', 'warn');
+  } catch(err){ toast('alert', err.message, 'err'); }
 }
 function copyAddress(){
   const a = serverAddress(); if(!a) return;
@@ -1168,6 +1209,7 @@ async function loadBackups(){
   renderBackups();
   const meta = curServer()?.meta;
   document.getElementById('bkAuto').checked = meta ? meta.backupAuto !== false : true;
+  renderBackupKeep();
   const total = state.backups.reduce((a,b)=>a+b.size,0);
   document.getElementById('backupsSubtitle').textContent =
     state.backups.length ? `Snapshots del servidor · ${fmtSize(total)} usados` : 'Snapshots del servidor · todavía no hay ninguno';
@@ -1213,6 +1255,27 @@ async function restoreBackupUI(name){
 async function deleteBackupUI(name){
   try { await API.del(`/servers/${curServerId()}/backups/${name}`); toast('trash',`Backup ${name} eliminado`,'warn'); loadBackups(); }
   catch(err){ toast('alert', err.message, 'err'); }
+}
+function renderBackupKeep(){
+  const meta = curServer()?.meta;
+  const keep = meta?.backupKeep ?? 7;
+  const sel = document.getElementById('bkKeep');
+  if(![...sel.options].some(o=>parseInt(o.value)===keep)){
+    sel.insertAdjacentHTML('beforeend', `<option value="${keep}">${keep} copias</option>`);
+  }
+  sel.value = String(keep);
+  const autos = state.backups.filter(b=>b.auto).length;
+  document.getElementById('bkKeepSub').textContent =
+    `Al hacer una nueva se borra la más antigua que sobre, para que no se coma el disco. Las manuales no se tocan.` +
+    (autos ? ` Ahora hay ${autos} automática${autos===1?'':'s'}.` : '');
+}
+async function changeBackupKeep(keep){
+  try {
+    const r = await API.put(`/servers/${curServerId()}/backup-settings`, { keep });
+    const meta = curServer()?.meta; if(meta) meta.backupKeep = keep;
+    toast('database', `Se conservan las últimas ${keep} copias automáticas${r.pruned ? ` · borradas ${r.pruned} antiguas` : ''}`, r.pruned ? 'warn' : 'ok');
+    loadBackups();
+  } catch(err){ toast('alert', err.message, 'err'); renderBackupKeep(); }
 }
 async function toggleBackupAuto(on){
   try { await API.put(`/servers/${curServerId()}/backup-settings`, { auto: on }); toast(on?'check':'x', on?'Backup diario activado':'Backup diario desactivado', on?'ok':'warn'); }

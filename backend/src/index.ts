@@ -19,7 +19,7 @@ import { systemMemory } from './system.js';
 import { playerLists, playerAction, whitelistAdd, whitelistRemove } from './players.js';
 import {
   listBackups, makeBackup, restoreBackup, deleteBackup, backupFilePath,
-  scheduleAutoBackups, setBackupBroadcast,
+  scheduleAutoBackups, setBackupBroadcast, pruneAuto,
 } from './backups.js';
 import {
   readProperties, writeProperties, listEditableFiles, readEditableFile, writeEditableFile,
@@ -436,10 +436,27 @@ app.put('/api/servers/:id/backup-settings', asyncRoute(async (req, res) => {
   const { auto, keep } = req.body as { auto?: boolean; keep?: number };
   const meta = await getServer(req.params.id!);
   if (!meta) { res.status(404).json({ error: 'Servidor no encontrado' }); return; }
+  if (keep !== undefined && (!Number.isInteger(keep) || keep < 1 || keep > 30)) { res.status(400).json({ error: 'Conserva entre 1 y 30 copias' }); return; }
   await updateServer(meta.id, {
     backupAuto: auto ?? meta.backupAuto,
-    backupKeep: keep !== undefined ? Math.min(Math.max(keep, 1), 30) : meta.backupKeep,
+    backupKeep: keep ?? meta.backupKeep,
   });
+  // si se baja el número, las copias automáticas que sobran se borran ya, sin esperar a las 04:00
+  const pruned = keep !== undefined ? await pruneAuto(meta.id, keep) : 0;
+  if (keep !== undefined) await audit('database', `Backups automáticos de ${meta.name}: conservar los últimos ${keep}${pruned ? ` (borradas ${pruned} copias antiguas)` : ''}`, 'info');
+  res.json({ ok: true, pruned });
+}));
+
+// ---- dirección pública (dominio/IP y puerto con los que entran los amigos desde fuera) ----
+app.put('/api/servers/:id/address', asyncRoute(async (req, res) => {
+  const { publicAddress } = req.body as { publicAddress?: string };
+  const meta = await getServer(req.params.id!);
+  if (!meta) { res.status(404).json({ error: 'Servidor no encontrado' }); return; }
+  const addr = (publicAddress ?? '').trim();
+  // host (dominio o IP) con puerto opcional; nada de espacios, esquemas ni rutas
+  if (addr && !/^[A-Za-z0-9.-]{1,253}(:\d{1,5})?$/.test(addr)) { res.status(400).json({ error: 'Escribe solo dominio-o-IP:puerto, por ejemplo micasa.freeboxos.fr:49152' }); return; }
+  await updateServer(meta.id, { publicAddress: addr || undefined });
+  await audit('link', addr ? `Dirección pública de ${meta.name}: ${addr}` : `Quitó la dirección pública de ${meta.name}`, 'info');
   res.json({ ok: true });
 }));
 
