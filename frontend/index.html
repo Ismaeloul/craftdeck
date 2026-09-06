@@ -55,6 +55,10 @@
         <div class="right"><button class="btn primary" onclick="openCreateWizard()"><i data-icon="plus" data-size="14"></i> Crear servidor</button></div>
       </div>
       <div class="grid cols-2" id="serversGrid"></div>
+      <div class="card" style="margin-top:14px;">
+        <h3><i data-icon="database" data-size="15"></i> Almacenamiento <span class="hint" id="storageHint"></span></h3>
+        <div id="storageBox"><div class="empty" style="padding:12px">Calculando…</div></div>
+      </div>
     </section>
 
     <!-- ========== DASHBOARD ========== -->
@@ -90,7 +94,7 @@
         <div class="card">
           <div class="stat-label"><i data-icon="zap" data-size="13"></i> CPU</div>
           <div class="stat-value"><span id="statCpu">—</span><span class="unit"> %</span></div>
-          <div class="stat-sub">Uso del proceso Java</div>
+          <div class="stat-sub" id="statCpuSub">Uso del proceso Java</div>
         </div>
         <div class="card">
           <div class="stat-label"><i data-icon="cpu" data-size="13"></i> Memoria</div>
@@ -106,7 +110,12 @@
 
       <div class="grid cols-2" style="margin-bottom:14px;">
         <div class="card">
-          <h3><i data-icon="users" data-size="15"></i> Jugadores en línea <span class="hint">últimos minutos</span></h3>
+          <h3><i data-icon="users" data-size="15"></i> Jugadores en línea
+            <span class="hint" style="display:flex;gap:4px;align-items:center">
+              <span class="tab active" data-range="live" onclick="setChartRange('live')" style="padding:2px 8px;font-size:11px">ahora</span>
+              <span class="tab" data-range="1h" onclick="setChartRange('1h')" style="padding:2px 8px;font-size:11px">1 h</span>
+              <span class="tab" data-range="24h" onclick="setChartRange('24h')" style="padding:2px 8px;font-size:11px">24 h</span>
+            </span></h3>
           <canvas class="chart" id="playersChart"></canvas>
         </div>
         <div class="card">
@@ -145,6 +154,7 @@
           </span>
         </div>
         <div class="console-body" id="consoleBody"></div>
+        <div class="quick-actions" id="quickActions"></div>
         <div class="console-input">
           <input type="text" id="cmdInput" placeholder="Comando… prueba: say hola · time set day · list · weather clear" autocomplete="off">
           <button class="btn primary small" onclick="sendCommand()" style="padding:9px 14px"><i data-icon="send" data-size="14"></i></button>
@@ -158,7 +168,7 @@
         <h2>Jugadores</h2>
         <p id="playersSubtitle"></p>
         <div class="right">
-          <button class="btn small" onclick="showBanned()"><i data-icon="ban" data-size="13"></i> Baneados</button>
+          <button class="btn small" onclick="document.getElementById('bannedCard').scrollIntoView({behavior:'smooth'})"><i data-icon="ban" data-size="13"></i> Baneados <span class="nav-badge warn" id="bannedCount" style="margin-left:4px"></span></button>
         </div>
       </div>
       <div class="card" style="padding:10px;"><div id="playerList"></div></div>
@@ -168,8 +178,16 @@
           <div id="playerRecent"></div>
         </div>
         <div class="card">
-          <h3><i data-icon="users" data-size="15"></i> Jugadores conocidos <span class="hint">última vez visto</span></h3>
+          <h3><i data-icon="users" data-size="15"></i> Jugadores conocidos <span class="hint">OP y ban también sin estar conectados</span></h3>
           <div id="playerKnown"></div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:14px;" id="bannedCard">
+        <h3><i data-icon="ban" data-size="15"></i> Baneados <span class="hint">desbanear con un clic</span></h3>
+        <div id="bannedList"></div>
+        <div style="display:flex; gap:8px; margin-top:12px;">
+          <div class="field" style="flex:1; margin:0;"><input type="text" id="banName" placeholder="Nick a banear (no hace falta que esté dentro)" maxlength="16" onkeydown="if(event.key==='Enter')banByName()"></div>
+          <button class="btn small danger" onclick="banByName()"><i data-icon="ban" data-size="13"></i> Banear</button>
         </div>
       </div>
       <div class="grid cols-2" style="margin-top:14px; align-items:start;">
@@ -243,6 +261,7 @@
       <div class="tabs">
         <div class="tab active" data-modtab="explore" onclick="switchModTab('explore')"><i data-icon="search" data-size="13"></i> Explorar</div>
         <div class="tab" data-modtab="installed" onclick="switchModTab('installed')"><i data-icon="package" data-size="13"></i> Instalados <span class="nav-badge" id="tabInstalledCount"></span></div>
+        <div class="tab" data-modtab="datapacks" onclick="switchModTab('datapacks')"><i data-icon="box" data-size="13"></i> Datapacks <span class="nav-badge" id="tabDatapackCount"></span></div>
       </div>
 
       <div id="modtab-explore">
@@ -264,6 +283,19 @@
         <div id="modPager" style="display:flex;gap:6px;align-items:center;justify-content:center;margin-top:18px;flex-wrap:wrap;"></div>
       </div>
 
+      <div id="modtab-datapacks" style="display:none">
+        <p style="font-size:12.5px;color:var(--muted2);line-height:1.6;margin-bottom:12px;">Los datapacks añaden contenido sin mods y valen en cualquier servidor, también vanilla. Tus amigos no tienen que instalar nada. Se aplican al arrancar, o al momento con <span style="font-family:var(--mono)">/reload</span> si el servidor está encendido.</p>
+        <div class="search-bar">
+          <div class="search-wrap">
+            <i data-icon="search" data-size="15"></i>
+            <input type="text" id="dpSearch" placeholder="Buscar datapacks en Modrinth… prueba: vanilla tweaks, graves, trees" oninput="onDpSearchInput()">
+          </div>
+          <button class="btn" onclick="document.getElementById('dpUploadInput').click()"><i data-icon="upload" data-size="13"></i> Subir .zip</button>
+          <input type="file" id="dpUploadInput" accept=".zip" multiple style="display:none" onchange="uploadDatapacks(this.files); this.value=''">
+        </div>
+        <div class="grid cols-2" id="dpGrid"></div>
+        <div class="card" id="dpInstalled" style="padding:10px;margin-top:14px;"></div>
+      </div>
       <div id="modtab-installed" style="display:none">
         <div class="search-bar">
           <div class="search-wrap">
@@ -293,7 +325,11 @@
         <div class="card">
           <h3><i data-icon="settings" data-size="15"></i> General</h3>
           <div class="form-grid">
-            <div class="field"><label>MOTD</label><input type="text" id="wMotd"></div>
+            <div class="field" style="grid-column:1/-1"><label>MOTD <span style="font-weight:400;color:var(--muted)">· lo que ven tus amigos en la lista de servidores</span></label>
+              <input type="text" id="wMotd" oninput="renderMotdPreview()">
+              <div class="motd-tools" id="motdTools"></div>
+              <div class="motd-preview" id="motdPreview"></div>
+            </div>
             <div class="field"><label>Semilla <span style="color:var(--muted);font-weight:400">(solo mundos nuevos)</span></label><input type="text" id="wSeed"></div>
             <div class="field"><label>Dificultad</label>
               <select id="wDifficulty"><option value="peaceful">Pacífico</option><option value="easy">Fácil</option><option value="normal" selected>Normal</option><option value="hard">Difícil</option></select>
@@ -350,6 +386,16 @@
           <div><div class="t-label">Flags de JVM de Aikar</div><div class="t-sub">Ajustes del recolector de basura pensados para Minecraft: menos tirones de lag con la misma RAM. Desactívalo solo si un mod raro se queja</div></div>
           <label class="switch"><input type="checkbox" id="resAikar" checked><span class="track"></span><span class="thumb"></span></label>
         </div>
+        <div class="toggle-row">
+          <div><div class="t-label">Dormir cuando no haya nadie</div><div class="t-sub">Si pasa este tiempo sin jugadores, el servidor se apaga y libera la RAM del Umbrel</div></div>
+          <select id="resIdle" style="width:auto;min-width:150px;background:var(--bg2);border:1px solid var(--border);border-radius:9px;padding:9px 12px;color:var(--text);font-size:13px;font-family:inherit;outline:none;">
+            <option value="0">Nunca</option><option value="15">Tras 15 min</option><option value="30">Tras 30 min</option><option value="60">Tras 1 h</option><option value="120">Tras 2 h</option><option value="360">Tras 6 h</option>
+          </select>
+        </div>
+        <div class="toggle-row">
+          <div><div class="t-label">Despertar cuando alguien intente entrar</div><div class="t-sub">Mientras duerme, CraftDeck escucha en su puerto: en la lista de servidores sale «dormido» y, al intentar entrar, lo arranca (en un minuto pueden jugar)</div></div>
+          <label class="switch"><input type="checkbox" id="resWake" checked><span class="track"></span><span class="thumb"></span></label>
+        </div>
         <button class="btn small primary" style="margin-top:8px;" onclick="saveResources()"><i data-icon="save" data-size="13"></i> Guardar rendimiento</button>
       </div>
       <div class="grid cols-2" style="margin-top:14px; align-items:start;">
@@ -382,6 +428,26 @@
             <input type="file" id="worldUploadInput" accept=".zip" style="display:none" onchange="uploadWorld(this.files[0]); this.value=''">
           </div>
           <div id="worldUploadProgress" class="ram-hint"></div>
+        </div>
+      </div>
+      <div class="grid cols-2" style="margin-top:14px; align-items:start;">
+        <div class="card">
+          <h3><i data-icon="globe" data-size="15"></i> Pregenerar el mundo <span class="hint">con Chunky</span></h3>
+          <p style="font-size:12.5px;color:var(--muted2);line-height:1.6;margin-bottom:12px;">Genera el terreno alrededor del spawn por adelantado, para que cuando tus amigos exploren no haya tirones. Tarda un rato y usa CPU mientras trabaja; el servidor debe estar encendido.</p>
+          <div id="chunkyBox"></div>
+        </div>
+        <div class="card">
+          <h3><i data-icon="package" data-size="15"></i> Icono del servidor <span class="hint">PNG de 64×64</span></h3>
+          <p style="font-size:12.5px;color:var(--muted2);line-height:1.6;margin-bottom:12px;">Sale en la lista de servidores de tus amigos (y en el aviso de «dormido»). Minecraft exige exactamente 64×64 píxeles.</p>
+          <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;">
+            <div id="iconPreview" class="avatar" style="width:64px;height:64px;border-radius:10px;overflow:hidden;"></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button class="btn small" onclick="document.getElementById('iconUploadInput').click()"><i data-icon="upload" data-size="13"></i> Subir PNG</button>
+              <input type="file" id="iconUploadInput" accept=".png,image/png" style="display:none" onchange="uploadIcon(this.files[0]); this.value=''">
+              <button class="btn small ghost" id="iconRemove" style="display:none;color:var(--danger)" onclick="removeIcon()">Quitar</button>
+            </div>
+          </div>
+          <p class="ram-hint" id="iconHint" style="margin-top:8px;"></p>
         </div>
       </div>
       <div class="card" style="margin-top:14px; border-color:rgba(248,113,113,.25);">
@@ -512,6 +578,7 @@
       <div class="section-head">
         <h2>Diagnóstico</h2>
         <p>Analizador de crash reports · te dice el culpable en cristiano</p>
+        <div class="right"><a class="btn small" id="logsDownload" href="#" title="logs/, crash-reports/ y la consola del panel en un .zip, para pedir ayuda"><i data-icon="download" data-size="13"></i> Descargar logs</a></div>
       </div>
       <div class="grid cols-2" style="grid-template-columns:340px 1fr; align-items:start;">
         <div class="card" style="padding:10px;" id="crashList"></div>
@@ -602,5 +669,6 @@
 <script src="js/world.js"></script>
 <script src="js/wizard.js"></script>
 <script src="js/more.js"></script>
+<script src="js/extra.js"></script>
 </body>
 </html>

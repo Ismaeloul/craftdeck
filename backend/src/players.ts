@@ -91,11 +91,60 @@ export async function whitelistRemove(id: string, name: string): Promise<void> {
   await audit('shield', `Quitó a ${name} de la whitelist`, 'warn');
 }
 
+async function resolveUuid(id: string, name: string): Promise<string> {
+  const premium = (await readProperties(id))['online-mode'] !== 'false';
+  const uuid = premium ? await premiumUuid(name) : offlineUuid(name);
+  if (!uuid) throw new Error(`No existe ninguna cuenta premium llamada «${name}»`);
+  return uuid;
+}
+
+async function editJsonList(id: string, file: string, mutate: (list: Record<string, unknown>[]) => Record<string, unknown>[]): Promise<void> {
+  const list = await readJsonList(id, file);
+  await writeFileAtomic(path.join(serverDir(id), file), JSON.stringify(mutate(list), null, 2));
+}
+
+/**
+ * Con el servidor encendido se usa el comando; apagado (o el jugador no está dentro)
+ * se editan ops.json / banned-players.json directamente, que es lo que hace el propio servidor.
+ */
+async function offlineAction(id: string, action: string, name: string, reason?: string): Promise<void> {
+  const lower = name.toLowerCase();
+  switch (action) {
+    case 'op': {
+      const uuid = await resolveUuid(id, name);
+      await editJsonList(id, 'ops.json', (l) => l.some((o) => String(o.name).toLowerCase() === lower) ? l : [...l, { uuid, name, level: 4, bypassesPlayerLimit: false }]);
+      return;
+    }
+    case 'deop':
+      await editJsonList(id, 'ops.json', (l) => l.filter((o) => String(o.name).toLowerCase() !== lower));
+      return;
+    case 'ban': {
+      const uuid = await resolveUuid(id, name);
+      const created = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' +0000');
+      await editJsonList(id, 'banned-players.json', (l) => l.some((b) => String(b.name).toLowerCase() === lower) ? l
+        : [...l, { uuid, name, created, source: 'CraftDeck', expires: 'forever', reason: reason || 'Banned by an operator.' }]);
+      return;
+    }
+    case 'pardon':
+      await editJsonList(id, 'banned-players.json', (l) => l.filter((b) => String(b.name).toLowerCase() !== lower));
+      return;
+    default:
+      throw new Error('Esa acción necesita el servidor encendido y al jugador dentro');
+  }
+}
+
 export async function playerAction(id: string, action: string, name: string, reason?: string): Promise<void> {
   const spec = ACTIONS[action];
   if (!spec) throw new Error(`Acción desconocida: ${action}`);
   if (!NAME_RE.test(name)) throw new Error('Nombre de jugador inválido');
   if (reason && /[\r\n]/.test(reason)) throw new Error('Razón inválida');
-  sendCommand(id, spec.cmd(name, reason));
-  await audit(action === 'ban' ? 'ban' : action === 'kick' ? 'logout' : 'crown', `${spec.audit} ${name}`, spec.level);
+  const online = runtimeOf(id).status === 'online';
+  const inside = runtimeOf(id).players.some((p) => p.name.toLowerCase() === name.toLowerCase());
+  // op/ban/pardon/deop funcionan aunque el jugador no esté (o el server esté apagado); kick necesita al jugador dentro
+  if (online && (inside || action === 'pardon' || action === 'deop' || action === 'op' || action === 'ban')) {
+    sendCommand(id, spec.cmd(name, reason));
+  } else {
+    await offlineAction(id, action, name, reason);
+  }
+  await audit(action === 'ban' ? 'ban' : action === 'kick' ? 'logout' : 'crown', `${spec.audit} ${name}${online ? '' : ' (servidor apagado)'}`, spec.level);
 }

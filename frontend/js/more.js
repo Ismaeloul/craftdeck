@@ -16,11 +16,12 @@ async function renderServersOverview(){
     const m = s.meta, r = m.runtime || {};
     const ready = m.provision?.status==='ready';
     const online = s.status==='online', busy = s.status==='starting' || s.status==='stopping';
+    const sleeping = !online && !busy && r.sleeping;
     return `<div class="card srv-card${s.id===state.currentServerId?' current':''}" style="animation-delay:${i*0.04}s" onclick="pickServerById('${s.id}'); go('dashboard')">
       <div class="srv-head">
-        <span class="ss-dot" style="width:9px;height:9px;background:${serverDotColor(s)}"></span>
+        ${m.serverIcon ? `<img src="/api/servers/${s.id}/icon" alt="" style="width:32px;height:32px;border-radius:8px;image-rendering:pixelated">` : `<span class="ss-dot" style="width:9px;height:9px;background:${sleeping?'var(--violet)':serverDotColor(s)}"></span>`}
         <div style="flex:1;min-width:0"><div class="srv-name">${esc(s.name)}</div><div class="srv-sub">${loaderName(m.loader)} ${esc(m.mcVersion)} · puerto ${m.port}${m.modpack?` · modpack ${esc(m.modpack.name)}`:''}</div></div>
-        <span class="chip ${online?'green':s.status==='error'?'red':busy?'amber':'gray'}">${serverStatusLabel(s).toUpperCase()}</span>
+        <span class="chip ${online?'green':s.status==='error'?'red':busy?'amber':sleeping?'sleeping':'gray'}">${sleeping?'DORMIDO':serverStatusLabel(s).toUpperCase()}</span>
       </div>
       <div class="srv-stats">
         <span>${icon('users',12)} <b>${(r.players||[]).length}</b> jugando</span>
@@ -33,10 +34,12 @@ async function renderServersOverview(){
           ? `<button class="btn small danger" ${busy?'disabled':''} onclick="serverAction('${s.id}','stop',this)">${icon('stop',12)} Detener</button>`
           : `<button class="btn small primary" ${ready?'':'disabled'} onclick="serverAction('${s.id}','start',this)">${icon('play',12)} Iniciar</button>`}
         <button class="btn small" onclick="pickServerById('${s.id}'); go('console')">${icon('terminal',12)} Consola</button>
+        <button class="btn small ghost" ${!online && !busy && ready ? '' : 'disabled'} onclick="askClone('${s.id}', '${esc(s.name).replace(/'/g,'&#39;')}')" title="Copiar mundo, mods y configuración a otro puerto">${icon('copy',12)} Clonar</button>
         <button class="btn small ghost" onclick="pickServerById('${s.id}'); go('dashboard')">Abrir</button>
       </div>
     </div>`;
   }).join('');
+  if(typeof renderStorage==='function') renderStorage();
 }
 function fmtUptime(s){ const h=Math.floor(s/3600), m=Math.floor(s/60)%60; return h?`${h} h ${m} min`:`${m} min`; }
 function pickServerById(id){

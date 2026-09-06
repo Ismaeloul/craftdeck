@@ -10,6 +10,8 @@ import { ensureJre, pickJavaMajor } from './java.js';
 import { getVanillaVersionInfo } from './catalog/vanilla.js';
 import { recordPlayerEvent } from './players-history.js';
 import { prepareBlueMapConfig } from './bluemap.js';
+import { startWakeListener, stopWakeListener } from './wake.js';
+import { writeFileAtomic } from './util.js';
 
 export type RunStatus = 'offline' | 'starting' | 'online' | 'stopping';
 type Broadcast = (type: string, payload: unknown) => void;
@@ -28,7 +30,16 @@ interface Instance {
   crashTimes: number[]; // cierres inesperados recientes (ventana anti-bucle del watchdog)
   autoRestartTimer: NodeJS.Timeout | null;
   startWarnTimer: NodeJS.Timeout | null;
+  emptySince: number | null; // desde cuándo no hay nadie (para el apagado por inactividad)
+  sleeping: boolean;         // apagado por inactividad, escuchando en su puerto para despertar
+  tps: number | null;        // último TPS leído (Paper)
+  tpsPending: boolean;       // hemos pedido «tps» y esperamos la línea de respuesta
+  metrics: MetricSample[];   // historial de métricas (una muestra cada 30 s, 24 h)
+  metricsLoaded: boolean;
+  ticks: number;
 }
+export interface MetricSample { t: number; cpu: number; mem: number; players: number; tps: number | null }
+const METRICS_MAX = 2880; // 24 h a una muestra cada 30 s
 
 // watchdog: reinicia solo tras un crash, pero corta si entra en bucle
 const WATCHDOG_WINDOW_MS = 10 * 60_000;
@@ -62,19 +73,41 @@ function inst(id: string): Instance {
     i = {
       proc: null, status: 'offline', startedAt: null, console: [], players: [],
       waiters: [], crashTimes: [], autoRestartTimer: null, startWarnTimer: null,
+      emptySince: null, sleeping: false, tps: null, tpsPending: false, metrics: [], metricsLoaded: false, ticks: 0,
     };
     instances.set(id, i);
   }
   return i;
 }
 
-export function runtimeOf(id: string): { status: RunStatus; players: OnlinePlayer[]; uptimeSec: number } {
+export function runtimeOf(id: string): { status: RunStatus; players: OnlinePlayer[]; uptimeSec: number; sleeping: boolean; tps: number | null } {
   const i = inst(id);
   return {
     status: i.status,
     players: i.players,
     uptimeSec: i.startedAt ? Math.floor((Date.now() - i.startedAt) / 1000) : 0,
+    sleeping: i.sleeping,
+    tps: i.status === 'online' ? i.tps : null,
   };
+}
+
+/** Historial de métricas (CPU, RAM, jugadores, TPS) de las últimas 24 h. */
+export async function metricsHistory(id: string): Promise<MetricSample[]> {
+  const i = inst(id);
+  await loadMetrics(id, i);
+  return i.metrics;
+}
+async function loadMetrics(id: string, i: Instance): Promise<void> {
+  if (i.metricsLoaded) return;
+  i.metricsLoaded = true;
+  try {
+    const saved = JSON.parse(await readFile(path.join(serverDir(id), 'craftdeck-metrics.json'), 'utf8')) as MetricSample[];
+    const cutoff = Date.now() - 24 * 3600_000;
+    i.metrics = [...saved.filter((s) => s.t > cutoff), ...i.metrics].slice(-METRICS_MAX);
+  } catch { /* sin historial */ }
+}
+async function saveMetrics(id: string, i: Instance): Promise<void> {
+  try { await writeFileAtomic(path.join(serverDir(id), 'craftdeck-metrics.json'), JSON.stringify(i.metrics)); } catch { /* best-effort */ }
 }
 
 export function consoleOf(id: string): string[] {
@@ -125,7 +158,14 @@ function clearTimers(i: Instance): void {
   if (i.startWarnTimer) { clearTimeout(i.startWarnTimer); i.startWarnTimer = null; }
 }
 
+const TPS_RE = /TPS from last 1m, 5m, 15m:\s*\*?([\d.]+)/;
+
 function pushLine(id: string, i: Instance, line: string): void {
+  // respuesta a nuestro «tps» silencioso (Paper): se lee y no se enseña
+  if (i.tpsPending) {
+    const t = line.replace(/\x1b\[[0-9;]*[A-Za-z]|§./g, '').match(TPS_RE);
+    if (t) { i.tps = Math.min(20, parseFloat(t[1]!)); i.tpsPending = false; return; }
+  }
   i.console.push(line);
   if (i.console.length > 400) i.console.shift();
   broadcastFn('console', { id, line });
@@ -133,6 +173,7 @@ function pushLine(id: string, i: Instance, line: string): void {
 
   if (i.status === 'starting' && /Done \([\d.,]+\s*s(econds)?\)!/.test(line)) {
     i.status = 'online';
+    i.emptySince = i.players.length ? null : Date.now();
     if (i.startWarnTimer) { clearTimeout(i.startWarnTimer); i.startWarnTimer = null; }
     broadcastFn('status', { id, status: 'online' });
     void discordEvent(id, 'online', 'El servidor está listo para jugar.');
@@ -140,6 +181,7 @@ function pushLine(id: string, i: Instance, line: string): void {
   let m = line.match(/\]:?\s(\S{1,16}) joined the game/);
   if (m) {
     if (!i.players.some((p) => p.name === m![1])) i.players.push({ name: m[1]!, joinedAt: Date.now() });
+    i.emptySince = null;
     broadcastFn('players', { id, players: i.players });
     void discordEvent(id, 'join', m[1]!);
     void recordPlayerEvent(id, m[1]!, 'join');
@@ -147,6 +189,7 @@ function pushLine(id: string, i: Instance, line: string): void {
   m = line.match(/\]:?\s(\S{1,16}) left the game/);
   if (m) {
     i.players = i.players.filter((p) => p.name !== m![1]);
+    if (!i.players.length) i.emptySince = Date.now();
     broadcastFn('players', { id, players: i.players });
     void discordEvent(id, 'leave', m[1]!);
     void recordPlayerEvent(id, m[1]!, 'leave');
@@ -248,6 +291,10 @@ export async function startServer(id: string): Promise<void> {
   const i = inst(id);
   if (i.proc) throw new Error('El servidor ya está en marcha');
   clearTimers(i); // un arranque manual cancela cualquier reinicio automático pendiente
+  // si estaba dormido, soltar el puerto para que lo coja Java
+  await stopWakeListener(id);
+  if (i.sleeping || meta.sleeping) { i.sleeping = false; await updateServer(id, { sleeping: false }).catch(() => {}); }
+  i.tps = null; i.tpsPending = false;
 
   // recalcular el Java requerido en cada arranque: corrige metas antiguas con un major insuficiente
   let javaMajor = meta.javaMajor;
@@ -326,10 +373,12 @@ export async function startServer(id: string): Promise<void> {
  * el deseo de estar encendido; el apagado de CraftDeck entero (`keepDesired`) no, para que
  * al volver el Umbrel se levante solo.
  */
-export function stopServer(id: string, opts: { keepDesired?: boolean } = {}): Promise<void> {
+export function stopServer(id: string, opts: { keepDesired?: boolean; sleep?: boolean } = {}): Promise<void> {
   const i = inst(id);
   clearTimers(i); // un stop manual también cancela el reinicio automático pendiente
   if (!opts.keepDesired) void setDesiredRunning(id, false);
+  // un stop deliberado también saca al servidor del modo dormido (deja de escuchar en el puerto)
+  if (!opts.keepDesired && !opts.sleep) void leaveSleep(id);
   const proc = i.proc;
   if (!proc) return Promise.resolve();
   i.status = 'stopping';
@@ -346,12 +395,64 @@ export function stopServer(id: string, opts: { keepDesired?: boolean } = {}): Pr
   });
 }
 
-export function sendCommand(id: string, cmd: string): void {
+export function sendCommand(id: string, cmd: string, opts: { silent?: boolean } = {}): void {
   const i = inst(id);
   if (!i.proc || i.status === 'offline') throw new Error('El servidor no está en marcha');
   i.proc.stdin!.write(cmd + '\n');
-  pushLine(id, i, `> ${cmd}`);
+  if (!opts.silent) pushLine(id, i, `> ${cmd}`);
 }
+
+/* ---------- modo dormido: apagado por inactividad + despertar al conectar ---------- */
+
+/** Apaga por inactividad y se queda escuchando en el puerto (si wakeOnConnect no está apagado). */
+async function idleStop(meta: ServerMeta, i: Instance): Promise<void> {
+  const mins = meta.idleStopMinutes ?? 0;
+  pushLine(meta.id, i, `[CraftDeck] ${mins} minutos sin nadie: apago el servidor para liberar RAM.${meta.wakeOnConnect === false ? '' : ' Se despertará cuando alguien intente entrar.'}`);
+  await audit('power', `${meta.name} se apagó por inactividad (${mins} min sin jugadores)`, 'info');
+  await stopServer(meta.id, { sleep: true });
+  await enterSleep(meta);
+}
+
+/** Marca el servidor como dormido y, si procede, pone el listener que lo despierta. */
+export async function enterSleep(meta: ServerMeta): Promise<void> {
+  const i = inst(meta.id);
+  if (i.proc) return;
+  i.sleeping = true;
+  await updateServer(meta.id, { sleeping: true, desiredRunning: false }).catch(() => {});
+  broadcastFn('status', { id: meta.id, status: 'offline', sleeping: true });
+  if (meta.wakeOnConnect === false) return;
+  await startWakeListener(meta, (player) => {
+    void audit('play', `${player} despertó el servidor ${meta.name} al intentar entrar`, 'ok');
+    startServer(meta.id).catch((err) => pushLine(meta.id, i, `[CraftDeck] No pude despertar el servidor: ${err instanceof Error ? err.message : err}`));
+  }, (m) => pushLine(meta.id, i, `[CraftDeck] ${m}`));
+}
+
+async function leaveSleep(id: string): Promise<void> {
+  const i = inst(id);
+  await stopWakeListener(id);
+  if (i.sleeping) {
+    i.sleeping = false;
+    await updateServer(id, { sleeping: false }).catch(() => {});
+  }
+}
+
+/** Al borrar un servidor: soltar su puerto si estaba dormido. */
+export async function forgetServer(id: string): Promise<void> {
+  await stopWakeListener(id);
+  instances.delete(id);
+}
+
+// cada 30 s: ¿algún servidor lleva demasiado tiempo vacío?
+setInterval(() => {
+  void (async () => {
+    for (const meta of await listServers()) {
+      const i = instances.get(meta.id);
+      if (!i || i.status !== 'online' || i.players.length || !meta.idleStopMinutes) continue;
+      if (!i.emptySince) { i.emptySince = Date.now(); continue; }
+      if (Date.now() - i.emptySince >= meta.idleStopMinutes * 60_000) await idleStop(meta, i).catch((err) => console.error('[idle]', err));
+    }
+  })();
+}, 30_000);
 
 /** Anuncio visible para todos los jugadores en el chat del juego. */
 export function announceInGame(id: string, text: string): void {
@@ -381,6 +482,12 @@ export async function runningMemoryMb(exceptId?: string): Promise<number> {
  * los servidores que estaban encendidos, de uno en uno para no descargar Java en paralelo.
  */
 export async function autoStartServers(): Promise<void> {
+  // los que se durmieron por inactividad vuelven a escuchar en su puerto
+  for (const meta of await listServers()) {
+    if (meta.provision.status === 'ready' && meta.sleeping && !meta.desiredRunning) {
+      await enterSleep(meta).catch((err) => console.error('[sleep]', err));
+    }
+  }
   const pending = (await listServers()).filter((m) =>
     m.provision.status === 'ready' && m.desiredRunning && m.autoStart !== false);
   if (!pending.length) return;
@@ -397,18 +504,37 @@ export async function autoStartServers(): Promise<void> {
   }
 }
 
-// métricas de proceso cada 3 s para los servidores en marcha
+// métricas de proceso cada 3 s para los servidores en marcha; cada 30 s se guarda una muestra
+// en el historial de 24 h y cada 60 s se pide el TPS a Paper (en silencio)
 setInterval(() => {
-  for (const [id, i] of instances) {
-    if (!i.proc?.pid) continue;
-    pidusage(i.proc.pid)
-      .then((s) => broadcastFn('metrics', {
-        id,
-        cpu: Math.round(s.cpu * 10) / 10,
-        memMb: Math.round(s.memory / 1048576),
-        uptimeSec: i.startedAt ? Math.floor((Date.now() - i.startedAt) / 1000) : 0,
-        players: i.players.length,
-      }))
-      .catch(() => { /* el proceso acaba de morir */ });
-  }
+  void (async () => {
+    const metas = await listServers();
+    for (const [id, i] of instances) {
+      if (!i.proc?.pid) continue;
+      i.ticks++;
+      const meta = metas.find((m) => m.id === id);
+      if (meta?.loader === 'paper' && i.status === 'online' && i.ticks % 20 === 0) {
+        try { i.tpsPending = true; sendCommand(id, 'tps', { silent: true }); } catch { i.tpsPending = false; }
+        setTimeout(() => { i.tpsPending = false; }, 5000); // si no contesta, no dejar el filtro colgado
+      }
+      pidusage(i.proc.pid)
+        .then(async (s) => {
+          const cpu = Math.round(s.cpu * 10) / 10;
+          const memMb = Math.round(s.memory / 1048576);
+          broadcastFn('metrics', {
+            id, cpu, memMb,
+            uptimeSec: i.startedAt ? Math.floor((Date.now() - i.startedAt) / 1000) : 0,
+            players: i.players.length,
+            tps: i.status === 'online' ? i.tps : null,
+          });
+          if (i.ticks % 10 === 0) {
+            await loadMetrics(id, i);
+            i.metrics.push({ t: Date.now(), cpu, mem: memMb, players: i.players.length, tps: i.tps });
+            if (i.metrics.length > METRICS_MAX) i.metrics.splice(0, i.metrics.length - METRICS_MAX);
+            if (i.ticks % 100 === 0) await saveMetrics(id, i);
+          }
+        })
+        .catch(() => { /* el proceso acaba de morir */ });
+    }
+  })();
 }, 3000);

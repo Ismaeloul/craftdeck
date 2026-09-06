@@ -1,7 +1,7 @@
 import express from 'express';
 import { createServer } from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
-import { rm, mkdir } from 'node:fs/promises';
+import { rm, mkdir, cp, readFile, writeFile, access } from 'node:fs/promises';
 import { createWriteStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
@@ -21,8 +21,10 @@ import { playerHistory } from './players-history.js';
 import { cmpVersion } from './util.js';
 import {
   setBroadcast, runtimeOf, consoleForPanel, startServer, stopServer, sendCommand, stopAll, announceInGame, assertNotBusy,
-  autoStartServers, runningMemoryMb,
+  autoStartServers, runningMemoryMb, forgetServer, metricsHistory,
 } from './instance.js';
+import { storageInfo } from './storage.js';
+import { listDatapacks, installDatapack, removeDatapack, toggleDatapack, addUploadedDatapack } from './datapacks.js';
 import { systemMemory } from './system.js';
 import { playerLists, playerAction, whitelistAdd, whitelistRemove } from './players.js';
 import {
@@ -324,9 +326,126 @@ app.post('/api/servers/:id/upload/:kind', asyncRoute(async (req, res) => {
     if (!name.endsWith('.zip')) { res.status(400).json({ error: 'El backup debe ser un .zip' }); return; }
     const tmp = await receiveUpload(req, 8 * 1024 * 1024 * 1024);
     res.status(201).json(await adoptUploadedBackup(meta.id, tmp));
+  } else if (kind === 'datapack') {
+    if (!name.endsWith('.zip')) { res.status(400).json({ error: 'El datapack debe ser un .zip' }); return; }
+    const tmp = await receiveUpload(req, 256 * 1024 * 1024);
+    await addUploadedDatapack(meta.id, name, tmp);
+    res.status(201).json({ ok: true, filename: name });
+  } else if (kind === 'icon') {
+    // server-icon.png: Minecraft exige PNG de exactamente 64x64
+    const tmp = await receiveUpload(req, 2 * 1024 * 1024);
+    const png = await readFile(tmp);
+    await rm(tmp, { force: true });
+    const isPng = png.length > 24 && png.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    const w = isPng ? png.readUInt32BE(16) : 0, h = isPng ? png.readUInt32BE(20) : 0;
+    if (!isPng) { res.status(400).json({ error: 'El icono tiene que ser un PNG' }); return; }
+    if (w !== 64 || h !== 64) { res.status(400).json({ error: `Minecraft exige 64×64 píxeles y este es de ${w}×${h}. Redimensiónalo (por ejemplo en Paint o en un editor online) y vuelve a subirlo.` }); return; }
+    await writeFile(path.join(serverDir(meta.id), 'server-icon.png'), png);
+    await updateServer(meta.id, { serverIcon: true });
+    await audit('upload', `Puso icono al servidor ${meta.name}`, 'ok');
+    res.status(201).json({ ok: true, needsRestart: runtimeOf(meta.id).status !== 'offline' });
   } else {
     res.status(400).json({ error: 'Tipo de subida desconocido' });
   }
+}));
+
+app.get('/api/servers/:id/icon', asyncRoute(async (req, res) => {
+  const file = path.join(serverDir(req.params.id!), 'server-icon.png');
+  try { await access(file); } catch { res.status(404).end(); return; }
+  res.setHeader('Cache-Control', 'no-cache');
+  res.sendFile(file);
+}));
+app.delete('/api/servers/:id/icon', asyncRoute(async (req, res) => {
+  const meta = await getServer(req.params.id!);
+  if (!meta) { res.status(404).json({ error: 'Servidor no encontrado' }); return; }
+  await rm(path.join(serverDir(meta.id), 'server-icon.png'), { force: true });
+  await updateServer(meta.id, { serverIcon: false });
+  res.json({ ok: true });
+}));
+
+// ---- datapacks (world/datapacks) ----
+app.get('/api/servers/:id/datapacks', asyncRoute(async (req, res) => {
+  res.json({ installed: await listDatapacks(req.params.id!) });
+}));
+app.post('/api/servers/:id/datapacks', asyncRoute(async (req, res) => {
+  const { project } = req.body as { project?: string };
+  if (!project || !/^[\w-]+$/.test(project)) { res.status(400).json({ error: 'Proyecto inválido' }); return; }
+  res.status(201).json({ installed: await installDatapack(req.params.id!, project), applied: runtimeOf(req.params.id!).status === 'online' });
+}));
+app.delete('/api/servers/:id/datapacks/:filename', asyncRoute(async (req, res) => {
+  await removeDatapack(req.params.id!, req.params.filename!);
+  res.json({ ok: true });
+}));
+app.post('/api/servers/:id/datapacks/:filename/toggle', asyncRoute(async (req, res) => {
+  const { enabled } = req.body as { enabled?: boolean };
+  await toggleDatapack(req.params.id!, req.params.filename!, !!enabled);
+  res.json({ ok: true });
+}));
+
+// ---- historial de métricas (24 h) y almacenamiento ----
+app.get('/api/servers/:id/metrics/history', asyncRoute(async (req, res) => {
+  res.json({ samples: await metricsHistory(req.params.id!) });
+}));
+app.get('/api/storage', asyncRoute(async (req, res) => {
+  res.json(await storageInfo(req.query.refresh === '1'));
+}));
+
+// ---- logs comprimidos para pedir ayuda ----
+app.get('/api/servers/:id/logs.zip', asyncRoute(async (req, res) => {
+  const meta = await getServer(req.params.id!);
+  if (!meta) { res.status(404).json({ error: 'Servidor no encontrado' }); return; }
+  res.attachment(`craftdeck-${meta.name.replace(/[^\w-]+/g, '_')}-logs.zip`);
+  const archive = createZip();
+  archive.on('error', (err) => res.destroy(err));
+  archive.pipe(res);
+  archive.glob('**/*', { cwd: path.join(serverDir(meta.id), 'logs') });
+  archive.glob('*.txt', { cwd: path.join(serverDir(meta.id), 'crash-reports') });
+  archive.append(JSON.stringify({ ...meta, craftdeck: APP_VERSION, runtime: runtimeOf(meta.id) }, null, 2), { name: 'craftdeck-server.json' });
+  archive.append(consoleForPanelText(await consoleForPanel(meta.id)), { name: 'consola-panel.txt' });
+  await archive.finalize();
+}));
+function consoleForPanelText(lines: string[]): string { return lines.join('\n') + '\n'; }
+
+// ---- clonar un servidor (mundo, mods y configuración a otro puerto; los backups no) ----
+app.post('/api/servers/:id/clone', asyncRoute(async (req, res) => {
+  const { name } = req.body as { name?: string };
+  const src = await getServer(req.params.id!);
+  if (!src) { res.status(404).json({ error: 'Servidor no encontrado' }); return; }
+  if (!name?.trim()) { res.status(400).json({ error: 'Ponle nombre al clon' }); return; }
+  if (src.provision.status !== 'ready') { res.status(400).json({ error: 'El servidor original aún no está preparado' }); return; }
+  if (runtimeOf(src.id).status !== 'offline') { res.status(400).json({ error: 'Detén el servidor antes de clonarlo (para copiar el mundo consistente)' }); return; }
+  assertNotBusy(src.id);
+  const meta: ServerMeta = {
+    ...src,
+    id: crypto.randomUUID().slice(0, 8),
+    name: name.trim(),
+    port: await nextFreePort(),
+    createdAt: new Date().toISOString(),
+    provision: { status: 'creating', log: [`Clonando «${src.name}»…`] },
+    desiredRunning: false, sleeping: false, publicAddress: undefined, mapPort: undefined,
+  };
+  await addServer(meta);
+  broadcast('servers', {});
+  res.status(201).json(meta);
+  void (async () => {
+    try {
+      const skip = new Set(['logs', 'crash-reports', 'session.lock', 'craftdeck-metrics.json', 'craftdeck-players.jsonl']);
+      await cp(serverDir(src.id), serverDir(meta.id), {
+        recursive: true,
+        filter: (p) => !skip.has(path.basename(p)) && !/[\\/]bluemap[\\/]web[\\/]/.test(p),
+      });
+      await writeProperties(meta.id, { 'server-port': String(meta.port) });
+      meta.provision = { status: 'ready', log: [`Clon de «${src.name}» listo.`] };
+      await updateServer(meta.id, { provision: meta.provision });
+      broadcast('provision', { id: meta.id, status: 'ready', msg: `Servidor «${meta.name}» listo.` });
+      await audit('copy', `Clonó ${src.name} como ${meta.name} (puerto ${meta.port})`, 'ok');
+    } catch (err) {
+      meta.provision = { status: 'error', log: [], error: err instanceof Error ? err.message : String(err) };
+      await updateServer(meta.id, { provision: meta.provision }).catch(() => {});
+      broadcast('provision', { id: meta.id, status: 'error', msg: meta.provision.error });
+    }
+    broadcast('servers', {});
+  })();
 }));
 
 // ---- mapa en vivo (BlueMap) ----
@@ -366,6 +485,7 @@ app.delete('/api/servers/:id', asyncRoute(async (req, res) => {
   }
   assertNotBusy(meta.id);
   await stopServer(meta.id);
+  await forgetServer(meta.id); // suelta el puerto si estaba dormido
   await removeServer(meta.id);
   await removeEventsOfServer(meta.id);
   await rm(serverDir(meta.id), { recursive: true, force: true });
@@ -425,11 +545,19 @@ app.put('/api/servers/:id/settings', asyncRoute(async (req, res) => {
     patch.cpuCores = cpuCores;
   }
   if (autoRestart !== undefined) patch.autoRestart = !!autoRestart;
+  const { idleStopMinutes, wakeOnConnect } = req.body as { idleStopMinutes?: number; wakeOnConnect?: boolean };
+  if (idleStopMinutes !== undefined) {
+    if (!Number.isInteger(idleStopMinutes) || idleStopMinutes < 0 || idleStopMinutes > 1440) { res.status(400).json({ error: 'Minutos de inactividad inválidos (0–1440)' }); return; }
+    patch.idleStopMinutes = idleStopMinutes;
+  }
+  if (wakeOnConnect !== undefined) patch.wakeOnConnect = !!wakeOnConnect;
   await updateServer(meta.id, patch);
   const bits = [];
   if (patch.memoryMb) bits.push(`${(patch.memoryMb / 1024).toFixed(0)} GB de RAM`);
   if (patch.cpuCores !== undefined) bits.push(patch.cpuCores === 0 ? 'todos los núcleos' : `${patch.cpuCores} núcleos`);
   if (patch.autoRestart !== undefined) bits.push(patch.autoRestart ? 'auto-reinicio tras crash activado' : 'auto-reinicio tras crash desactivado');
+  if (patch.idleStopMinutes !== undefined) bits.push(patch.idleStopMinutes ? `se duerme tras ${patch.idleStopMinutes} min sin nadie` : 'nunca se duerme');
+  if (patch.wakeOnConnect !== undefined) bits.push(patch.wakeOnConnect ? 'se despierta al conectar' : 'no se despierta al conectar');
   if (patch.autoStart !== undefined) bits.push(patch.autoStart ? 'arranque automático con el Umbrel activado' : 'arranque automático con el Umbrel desactivado');
   if (patch.aikarFlags !== undefined) bits.push(patch.aikarFlags ? 'flags de Aikar activados' : 'flags de Aikar desactivados');
   if (bits.length) await audit('cpu', `Ajustó el rendimiento de ${meta.name}: ${bits.join(', ')}`, 'info');
@@ -466,8 +594,10 @@ app.put('/api/servers/:id/properties', asyncRoute(async (req, res) => {
   if (!patch || typeof patch !== 'object') { res.status(400).json({ error: 'Body inválido' }); return; }
   const clean: Record<string, string> = {};
   for (const [k, v] of Object.entries(patch)) {
-    if (!/^[a-z0-9.-]+$/i.test(k) || /[\r\n]/.test(String(v))) { res.status(400).json({ error: `Clave o valor inválido: ${k}` }); return; }
-    clean[k] = String(v);
+    // el MOTD admite salto de línea: Minecraft lo guarda como "\n" literal en el properties
+    const val = k === 'motd' ? String(v).replace(/\r?\n/g, '\\n') : String(v);
+    if (!/^[a-z0-9.-]+$/i.test(k) || /[\r\n]/.test(val)) { res.status(400).json({ error: `Clave o valor inválido: ${k}` }); return; }
+    clean[k] = val;
   }
   const before = await readProperties(id);
   const changed = Object.entries(clean).filter(([k, v]) => (before[k] ?? '') !== v);

@@ -53,7 +53,9 @@ function showBanned(){
   toast('ban', b.length ? `Baneados (${b.length}): ${b.map(x=>x.name).join(', ')}` : 'Nadie está baneado', b.length?'warn':'info');
 }
 
-function applyStatus(status){
+function applyStatus(status, sleeping){
+  if(sleeping !== undefined) state.sleeping = !!sleeping;
+  if(status!=='offline') state.sleeping = false;
   if(status==='stopping'){ setStatus('starting'); statusText.textContent='Deteniendo…'; return; }
   setStatus(status==='online'?'online':status==='starting'?'starting':'offline');
 }
@@ -67,7 +69,10 @@ async function onServerSwitched(){
   const id = curServerId(); if(!id){ setStatus('offline'); setPlayers([]); return; }
   try {
     const s = await API.get(`/servers/${id}`);
-    applyStatus(s.runtime.status);
+    applyStatus(s.runtime.status, s.runtime.sleeping);
+    renderTps(s.runtime.tps);
+    state.metricsSamples = []; if(state.chartRange!=='live') loadMetricsHistory();
+    refreshLogsLink();
     state.uptimeSec = s.runtime.uptimeSec || 0;
     setPlayers(s.runtime.players);
     document.getElementById('statRamMax').textContent = ` / ${(s.memoryMb/1024).toFixed(0)} GB`;
@@ -91,7 +96,8 @@ onWS((msg)=>{
       logRemote(msg.line);
       break;
     case 'status':
-      applyStatus(msg.status);
+      applyStatus(msg.status, msg.sleeping);
+      if(msg.sleeping) toast('power','El servidor se ha dormido por inactividad','info');
       if(msg.status==='online') toast('check','Servidor en línea','ok');
       if(msg.status==='offline'){
         state.uptimeSec = 0; setPlayers([]);

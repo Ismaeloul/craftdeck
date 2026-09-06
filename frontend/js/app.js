@@ -350,7 +350,8 @@ function setStatus(mode){
   const ready = curServer()?.meta?.provision?.status === 'ready';
   if(mode==='online'){ statusText.textContent='En línea'; state.online=true; btnStart.disabled=true; btnStop.disabled=false; btnRestart.disabled=false; }
   // un servidor a medio crear (o que falló) no se puede arrancar
-  if(mode==='offline'){ statusText.textContent = ready ? 'Detenido' : (curServer() ? 'Sin crear' : 'Sin servidor'); state.online=false; btnStart.disabled=!ready; btnStop.disabled=true; btnRestart.disabled=true; }
+  if(mode==='offline'){ statusText.textContent = ready ? (state.sleeping ? 'Dormido' : 'Detenido') : (curServer() ? 'Sin crear' : 'Sin servidor'); state.online=false; btnStart.disabled=!ready; btnStop.disabled=true; btnRestart.disabled=true; if(state.sleeping) statusDot.className='dot sleeping'; }
+  if(typeof renderSleepBanner==='function') renderSleepBanner();
   // Detener sigue disponible durante el arranque: si se atasca, hay salida
   if(mode==='starting'){ statusText.textContent='Arrancando…'; btnStart.disabled=true; btnStop.disabled=false; btnRestart.disabled=true; }
 }
@@ -537,6 +538,10 @@ function loadResources(){
   document.getElementById('resAutoRestart').checked = meta.autoRestart !== false;
   document.getElementById('resAutoStart').checked = meta.autoStart !== false;
   document.getElementById('resAikar').checked = meta.aikarFlags !== false;
+  const idleSel = document.getElementById('resIdle'), idleVal = String(meta.idleStopMinutes || 0);
+  if(![...idleSel.options].some(o=>o.value===idleVal)) idleSel.insertAdjacentHTML('beforeend', `<option value="${idleVal}">Tras ${idleVal} min</option>`);
+  idleSel.value = idleVal;
+  document.getElementById('resWake').checked = meta.wakeOnConnect !== false;
   loadSystemInfo(meta.id).then(()=>updateRamHint('res'));
 }
 async function saveResources(){
@@ -545,10 +550,12 @@ async function saveResources(){
   const autoRestart = document.getElementById('resAutoRestart').checked;
   const autoStart = document.getElementById('resAutoStart').checked;
   const aikarFlags = document.getElementById('resAikar').checked;
+  const idleStopMinutes = parseInt(document.getElementById('resIdle').value) || 0;
+  const wakeOnConnect = document.getElementById('resWake').checked;
   try {
-    const r = await API.put(`/servers/${curServerId()}/settings`, { memoryMb, cpuCores, autoRestart, autoStart, aikarFlags });
+    const r = await API.put(`/servers/${curServerId()}/settings`, { memoryMb, cpuCores, autoRestart, autoStart, aikarFlags, idleStopMinutes, wakeOnConnect });
     const meta = curServer()?.meta;
-    if(meta){ Object.assign(meta, { memoryMb, cpuCores, autoRestart, autoStart, aikarFlags }); }
+    if(meta){ Object.assign(meta, { memoryMb, cpuCores, autoRestart, autoStart, aikarFlags, idleStopMinutes, wakeOnConnect }); }
     document.getElementById('statRamMax').textContent = ` / ${(memoryMb/1024).toFixed(0)} GB`;
     toast('cpu', `Rendimiento guardado${r.needsRestart ? ' — se aplica al reiniciar' : ''}`, 'ok');
   } catch(err){ toast('alert', err.message, 'err'); }
@@ -1423,9 +1430,10 @@ function tickCharts(){
   // el historial lo alimentan los eventos 'metrics' del WebSocket (live.js)
   [state.playersHistory,state.cpuHistory,state.ramHistory].forEach(a=>{ if(a.length>90)a.shift(); });
   const pad = a => a.length>1 ? a : [0,0];
-  const maxP = Math.max(5, ...state.playersHistory);
-  drawChart(document.getElementById('playersChart'),pad(state.playersHistory),{min:0,max:maxP+1,color:'#34d399',fill:'rgba(52,211,153,.18)'});
-  drawDualChart(document.getElementById('cpuChart'),pad(state.cpuHistory),pad(state.ramHistory));
+  const series = typeof chartSeries==='function' ? chartSeries() : { players: state.playersHistory, cpu: state.cpuHistory, ram: state.ramHistory };
+  const maxP = Math.max(5, ...series.players);
+  drawChart(document.getElementById('playersChart'),pad(series.players),{min:0,max:maxP+1,color:'#34d399',fill:'rgba(52,211,153,.18)'});
+  drawDualChart(document.getElementById('cpuChart'),pad(series.cpu),pad(series.ram));
 }
 setInterval(tickCharts,1500);
 

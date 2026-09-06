@@ -39,6 +39,10 @@ export interface ServerMeta {
   backupTime?: string;   // "HH:MM" del backup automático (default 04:00)
   backupDays?: number[]; // días de la semana (0=domingo); ausente = todos los días
   mapPort?: number;      // puerto local del webserver de BlueMap (solo dentro del contenedor)
+  idleStopMinutes?: number; // 0/ausente = nunca; si lleva N minutos sin nadie, se apaga (modo dormido)
+  wakeOnConnect?: boolean;  // default true: mientras duerme, escucha en su puerto y arranca cuando alguien entra
+  sleeping?: boolean;       // se apagó por inactividad (al arrancar CraftDeck se vuelve a poner a escuchar)
+  serverIcon?: boolean;     // hay server-icon.png (lo enseñan los launchers de los amigos)
   discord?: { url: string; onStatus: boolean; onPlayers: boolean; onBackup: boolean; chatMirror: boolean };
 }
 

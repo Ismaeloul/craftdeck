@@ -11,10 +11,18 @@ export async function readProperties(id: string): Promise<Record<string, string>
     for (const line of raw.split(/\r?\n/)) {
       if (!line || line.startsWith('#')) continue;
       const eq = line.indexOf('=');
-      if (eq > 0) out[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+      if (eq > 0) out[line.slice(0, eq).trim()] = decodeProp(line.slice(eq + 1).trim());
     }
   } catch { /* aún no existe */ }
   return out;
+}
+
+/** server.properties es Latin-1 con escapes \uXXXX (así es como Minecraft guarda el § del MOTD y los acentos). */
+function decodeProp(v: string): string {
+  return v.replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+}
+function encodeProp(v: string): string {
+  return v.replace(/[^\x20-\x7e]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
 }
 
 /** Actualiza claves preservando comentarios y orden del archivo. */
@@ -24,7 +32,7 @@ export async function writeProperties(id: string, patch: Record<string, string>)
   try {
     lines = (await readFile(file, 'utf8')).split(/\r?\n/);
   } catch { /* archivo nuevo */ }
-  const pending = new Map(Object.entries(patch));
+  const pending = new Map(Object.entries(patch).map(([k, v]) => [k, encodeProp(v)]));
   lines = lines.map((line) => {
     if (!line || line.startsWith('#')) return line;
     const eq = line.indexOf('=');
