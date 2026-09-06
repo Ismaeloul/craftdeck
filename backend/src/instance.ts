@@ -1,8 +1,9 @@
 import { spawn, ChildProcess } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import pidusage from 'pidusage';
 import { APP_VERSION } from './paths.js';
-import { ServerMeta, getServer, updateServer, serverDir, audit } from './store.js';
+import { ServerMeta, getServer, listServers, updateServer, serverDir, audit } from './store.js';
 import { discordEvent } from './discord.js';
 import { latestCrash } from './crashes.js';
 import { ensureJre, pickJavaMajor } from './java.js';
@@ -78,6 +79,23 @@ export function consoleOf(id: string): string[] {
   return inst(id).console;
 }
 
+/**
+ * Consola para el panel: el buffer en memoria y, si está vacío (CraftDeck acaba de
+ * arrancar), las últimas líneas de logs/latest.log de la sesión anterior.
+ */
+export async function consoleForPanel(id: string): Promise<string[]> {
+  const i = inst(id);
+  if (i.console.length) return i.console;
+  try {
+    const raw = await readFile(path.join(serverDir(id), 'logs', 'latest.log'), 'utf8');
+    const lines = raw.split(/\r?\n/).filter((l) => l.trim()).slice(-150);
+    if (!lines.length) return [];
+    return ['[CraftDeck] Últimas líneas de logs/latest.log (sesión anterior):', ...lines];
+  } catch {
+    return [];
+  }
+}
+
 /** Espera a que la consola emita una línea que case con `re` (false si expira o el server muere). */
 export function waitForLine(id: string, re: RegExp, timeoutMs: number): Promise<boolean> {
   const i = inst(id);
@@ -133,8 +151,30 @@ function pushLine(id: string, i: Instance, line: string): void {
   if (m) void discordEvent(id, 'chat', `**${m[1]}** ${m[2]}`);
 }
 
+/**
+ * Flags de Aikar (https://mcflags.emc.gs): G1GC afinado para servidores de Minecraft.
+ * Menos tirones de lag con la misma RAM. Los valores cambian a partir de 12 GB de heap.
+ */
+export function aikarFlags(memoryMb: number): string[] {
+  const big = memoryMb >= 12 * 1024;
+  return [
+    '-XX:+UseG1GC', '-XX:+ParallelRefProcEnabled', '-XX:MaxGCPauseMillis=200',
+    '-XX:+UnlockExperimentalVMOptions', '-XX:+DisableExplicitGC',
+    `-XX:G1NewSizePercent=${big ? 40 : 30}`, `-XX:G1MaxNewSizePercent=${big ? 50 : 40}`,
+    `-XX:G1HeapRegionSize=${big ? 16 : 8}M`, `-XX:G1ReservePercent=${big ? 15 : 20}`,
+    '-XX:G1HeapWastePercent=5', '-XX:G1MixedGCCountTarget=4',
+    `-XX:InitiatingHeapOccupancyPercent=${big ? 20 : 15}`, '-XX:G1MixedGCLiveThresholdPercent=90',
+    '-XX:G1RSetUpdatingPauseTimePercent=5', '-XX:SurvivorRatio=32', '-XX:+PerfDisableSharedMem',
+    '-XX:MaxTenuringThreshold=1', '-Dusing.aikars.flags=https://mcflags.emc.gs', '-Daikars.new.flags=true',
+  ];
+}
+
 function launchArgs(meta: ServerMeta): string[] {
   const jvm = [`-Xmx${meta.memoryMb}M`];
+  if (meta.aikarFlags !== false) {
+    // Aikar recomienda Xms = Xmx; sin AlwaysPreTouch Linux no reserva la RAM física hasta usarla
+    jvm.push(`-Xms${meta.memoryMb}M`, ...aikarFlags(meta.memoryMb));
+  }
   // limita cuántos núcleos ve Java (0 o ausente = todos)
   if (meta.cpuCores && meta.cpuCores > 0) jvm.push(`-XX:ActiveProcessorCount=${meta.cpuCores}`);
   if (meta.launch!.type === 'jar') {
@@ -145,6 +185,15 @@ function launchArgs(meta: ServerMeta): string[] {
     process.platform === 'win32' ? 'win_args.txt' : 'unix_args.txt',
   );
   return [...jvm, `@${argsFile}`, 'nogui'];
+}
+
+/** Recuerda si el servidor «debería estar encendido» (para volver a levantarlo tras reiniciar el Umbrel). */
+async function setDesiredRunning(id: string, on: boolean): Promise<void> {
+  try {
+    const meta = await getServer(id);
+    if (!meta || (meta.desiredRunning ?? false) === on) return;
+    await updateServer(id, { desiredRunning: on });
+  } catch { /* el servidor se está borrando */ }
 }
 
 /** Cierre inesperado: analiza el crash, avisa con el culpable y programa el auto-reinicio si procede. */
@@ -180,6 +229,7 @@ async function handleCrash(id: string, i: Instance, meta: ServerMeta, code: numb
     pushLine(id, i, `[CraftDeck] ${attempt} crashes en 10 minutos: pauso el reinicio automático para no entrar en bucle. Mira Diagnóstico.${culpritTxt}`);
     void discordEvent(id, 'crash', `⚠️ Crash en bucle: ${attempt} caídas en 10 minutos, dejo el servidor apagado.${culpritTxt} Entra en Diagnóstico y desactiva el mod culpable.`);
     void audit('alert', `${meta.name} entró en bucle de crashes; auto-reinicio pausado`, 'err');
+    void setDesiredRunning(id, false); // que un reinicio del Umbrel no reanude el bucle
   } else {
     void discordEvent(id, 'crash', `Terminó inesperadamente (código ${code}).${oomHint}${culpritTxt} El reinicio automático está desactivado; mira Diagnóstico en el panel.`);
   }
@@ -207,14 +257,16 @@ export async function startServer(id: string): Promise<void> {
     pushLine(id, i, `[CraftDeck] Aviso: no pude verificar el Java requerido (${err instanceof Error ? err.message : err}); uso Java ${javaMajor}`);
   }
   const java = await ensureJre(javaMajor, (m) => pushLine(id, i, `[CraftDeck] ${m}`));
+  if (i.proc) throw new Error('El servidor ya está en marcha'); // otro arranque ganó mientras descargábamos Java
   i.status = 'starting';
   i.startedAt = Date.now();
   i.players = [];
   broadcastFn('status', { id, status: 'starting' });
-  pushLine(id, i, `[CraftDeck v${APP_VERSION}] Arrancando ${meta.name} (${meta.loader} ${meta.mcVersion}, ${meta.memoryMb} MB, Java ${javaMajor})…`);
+  pushLine(id, i, `[CraftDeck v${APP_VERSION}] Arrancando ${meta.name} (${meta.loader} ${meta.mcVersion}, ${meta.memoryMb} MB, Java ${javaMajor}${meta.aikarFlags === false ? '' : ', flags de Aikar'})…`);
 
   const proc = spawn(java, launchArgs(meta), { cwd: serverDir(id), stdio: ['pipe', 'pipe', 'pipe'] });
   i.proc = proc;
+  void setDesiredRunning(id, true);
 
   i.startWarnTimer = setTimeout(() => {
     if (i.status === 'starting') {
@@ -262,9 +314,15 @@ export async function startServer(id: string): Promise<void> {
   await audit('play', `Inició el servidor ${meta.name}`, 'ok');
 }
 
-export function stopServer(id: string): Promise<void> {
+/**
+ * Detiene el servidor. Un stop «deliberado» (botón, tarea programada, borrado) apaga también
+ * el deseo de estar encendido; el apagado de CraftDeck entero (`keepDesired`) no, para que
+ * al volver el Umbrel se levante solo.
+ */
+export function stopServer(id: string, opts: { keepDesired?: boolean } = {}): Promise<void> {
   const i = inst(id);
   clearTimers(i); // un stop manual también cancela el reinicio automático pendiente
+  if (!opts.keepDesired) void setDesiredRunning(id, false);
   const proc = i.proc;
   if (!proc) return Promise.resolve();
   i.status = 'stopping';
@@ -297,8 +355,39 @@ export function anyRunning(): boolean {
   return [...instances.values()].some((i) => i.proc);
 }
 
+/** Apagado de CraftDeck: para todos los servidores sin olvidar que deberían estar encendidos. */
 export async function stopAll(): Promise<void> {
-  await Promise.all([...instances.keys()].map((id) => stopServer(id)));
+  await Promise.all([...instances.keys()].map((id) => stopServer(id, { keepDesired: true })));
+}
+
+/** Suma de la RAM asignada a los servidores que están en marcha (para los avisos de memoria). */
+export async function runningMemoryMb(exceptId?: string): Promise<number> {
+  let total = 0;
+  for (const meta of await listServers()) {
+    if (meta.id !== exceptId && inst(meta.id).proc) total += meta.memoryMb;
+  }
+  return total;
+}
+
+/**
+ * Al arrancar CraftDeck (reinicio del Umbrel, actualización de la app): vuelve a levantar
+ * los servidores que estaban encendidos, de uno en uno para no descargar Java en paralelo.
+ */
+export async function autoStartServers(): Promise<void> {
+  const pending = (await listServers()).filter((m) =>
+    m.provision.status === 'ready' && m.desiredRunning && m.autoStart !== false);
+  if (!pending.length) return;
+  console.log(`[craftdeck] auto-arranque: ${pending.map((m) => m.name).join(', ')}`);
+  for (const meta of pending) {
+    try {
+      pushLine(meta.id, inst(meta.id), '[CraftDeck] CraftDeck se ha reiniciado: vuelvo a arrancar el servidor porque estaba encendido.');
+      await startServer(meta.id);
+      await audit('play', `Arrancó ${meta.name} automáticamente tras reiniciar CraftDeck`, 'info');
+    } catch (err) {
+      console.error(`[craftdeck] auto-arranque de ${meta.name}:`, err);
+    }
+    await new Promise((r) => setTimeout(r, 5_000));
+  }
 }
 
 // métricas de proceso cada 3 s para los servidores en marcha

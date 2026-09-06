@@ -50,6 +50,7 @@ const ICONS = {
   box: '<path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/>',
   link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
   pickaxe: '<path d="M14.5 3.5 12 6 9.5 3.5a1 1 0 0 0-1.4 0L6.7 4.9a1 1 0 0 0 0 1.4L9.2 8.8 3 15v6h6l6.2-6.2 2.5 2.5a1 1 0 0 0 1.4 0l1.4-1.4a1 1 0 0 0 0-1.4L18 12l2.5-2.5"/>',
+  menu: '<path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/>',
 };
 function icon(name, size=16){
   return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]||ICONS.box}</svg>`;
@@ -119,7 +120,13 @@ document.getElementById('navContainer').innerHTML = NAV.map(g =>
   }).join('')
 ).join('');
 
+/* menú lateral en móvil */
+function openNav(){ document.body.classList.add('nav-open'); }
+function closeNav(){ document.body.classList.remove('nav-open'); }
+document.getElementById('menuBtn').addEventListener('click', ()=>document.body.classList.toggle('nav-open'));
+
 function go(id){
+  closeNav();
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.section===id));
   document.querySelectorAll('.section').forEach(s=>s.classList.remove('visible'));
   const el = document.getElementById('sec-'+id);
@@ -149,10 +156,16 @@ document.getElementById('ssChevron').innerHTML = icon('chevronsUpDown',14);
 function renderServerMenu(){
   document.getElementById('ssMenu').innerHTML = state.servers.map((s,i)=>`
     <div class="ss-item" onclick="pickServer(${i})">
-      <span class="ss-dot" style="background:${s.status==='online'?'var(--accent)':'var(--danger)'}"></span>
-      ${s.name}<small>${s.status==='online'?'en línea':'detenido'}</small>
+      <span class="ss-dot" style="background:${serverDotColor(s)}"></span>
+      ${esc(s.name)}<small>${serverStatusLabel(s)}</small>
     </div>`).join('') +
     `<div class="ss-item" style="color:var(--muted2)" onclick="openCreateWizard()">${icon('plus',14)} Crear servidor…</div>`;
+}
+function serverDotColor(s){
+  return { online:'var(--accent)', starting:'var(--warn)', stopping:'var(--warn)', creating:'var(--info)', error:'var(--danger)' }[s.status] || 'var(--muted)';
+}
+function serverStatusLabel(s){
+  return { online:'en línea', starting:'arrancando', stopping:'deteniendo', creating:'creándose', error:'error al crear' }[s.status] || 'detenido';
 }
 function toggleServerMenu(e){ e.stopPropagation(); document.getElementById('ssMenu').classList.toggle('open'); }
 document.addEventListener('click', ()=>document.getElementById('ssMenu').classList.remove('open'));
@@ -162,9 +175,68 @@ function pickServer(i){
   state.currentServerId = s.id;
   document.getElementById('ssName').textContent = s.name;
   document.getElementById('ssSub').textContent = s.sub;
-  document.getElementById('ssDot').style.background = s.status==='online'?'var(--accent)':'var(--danger)';
+  document.getElementById('ssDot').style.background = serverDotColor(s);
   if(typeof onServerSwitched==='function') onServerSwitched();
 }
+
+/* =================== DIRECCIÓN PARA AMIGOS =================== */
+function serverAddress(){
+  const s = curServer();
+  if(!s) return '';
+  // el navegador ya está hablando con el Umbrel: su host es la dirección de la red local
+  return `${location.hostname}:${s.meta.port}`;
+}
+function renderAddress(){
+  const s = curServer();
+  document.getElementById('addrValue').textContent = s ? serverAddress() : 'Crea un servidor para verla';
+  document.getElementById('addrCopy').disabled = !s;
+}
+function copyAddress(){
+  const a = serverAddress(); if(!a) return;
+  navigator.clipboard?.writeText(a);
+  toast('copy', `${a} copiado — pásaselo a tus amigos`, 'ok');
+}
+
+/* =================== AVISO DE APROVISIONADO (creándose / falló) =================== */
+function renderProvisionBanner(){
+  const el = document.getElementById('provisionBanner');
+  const p = curServer()?.meta?.provision;
+  if(!p || p.status==='ready'){ el.style.display='none'; el.innerHTML=''; return; }
+  el.style.display = '';
+  if(p.status==='creating'){
+    const last = p.log?.length ? p.log[p.log.length-1] : 'Preparando…';
+    el.innerHTML = `<div class="banner info"><span class="banner-icon"><span class="spin"></span></span>
+      <div class="banner-body"><div class="banner-title">Creando el servidor…</div>
+      <div class="banner-detail" id="provisionLast">${esc(last)}</div></div></div>`;
+  } else {
+    el.innerHTML = `<div class="banner err"><span class="banner-icon">${icon('alert',18)}</span>
+      <div class="banner-body"><div class="banner-title">La creación de este servidor falló</div>
+      <div class="banner-detail">${esc(p.error || 'Error desconocido')}</div>
+      <div class="banner-actions">
+        <button class="btn small primary" onclick="retryProvision(this)">${icon('refresh',13)} Reintentar</button>
+        <button class="btn small danger" onclick="armAction(this, deleteServerUI)">${icon('trash',13)} Eliminar servidor</button>
+      </div></div></div>`;
+  }
+}
+async function retryProvision(btn){
+  btn.disabled = true;
+  try {
+    await API.post(`/servers/${curServerId()}/provision/retry`);
+    toast('refresh','Reintentando la creación — sigue el progreso aquí mismo','info');
+    await refreshServers();
+    renderProvisionBanner();
+  } catch(err){ toast('alert', err.message, 'err'); btn.disabled = false; }
+}
+onWS((msg)=>{
+  if(msg.type!=='provision' || msg.id!==curServerId()) return;
+  const meta = curServer()?.meta;
+  if(meta && meta.provision.status==='creating'){
+    meta.provision.log.push(msg.msg);
+    const last = document.getElementById('provisionLast');
+    if(last) last.textContent = msg.msg;
+  }
+  if(msg.status==='error' || /listo\.$/.test(msg.msg)) refreshServers().then(()=>{ renderProvisionBanner(); if(typeof applyStatus==='function') applyStatus('offline'); });
+});
 renderServerMenu();
 
 /* =================== TOASTS =================== */
@@ -193,7 +265,7 @@ function renderAudit(){
     return `<div class="audit-row" style="animation-delay:${Math.min(i*0.03,.3)}s">
       <span class="audit-time">${a.when}</span>
       <span class="audit-icon" style="background:${bg};color:${color}">${icon(a.ic,13)}</span>
-      <span><b style="font-weight:620">isma</b> · ${a.text}</span>
+      <span>${esc(a.text)}</span>
     </div>`;
   }).join('') || '<div class="empty">Sin actividad registrada</div>';
 }
@@ -215,7 +287,7 @@ function renderActivity(){
   document.getElementById('activityFeed').innerHTML = state.audit.slice(0,5).map(a=>`
     <div style="display:flex;align-items:center;gap:11px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:12.5px;">
       <span style="color:${colors[a.type]||'var(--muted2)'};display:flex">${icon(a.ic,14)}</span>
-      <span style="flex:1">${a.text}</span>
+      <span style="flex:1">${esc(a.text)}</span>
       <span style="color:var(--muted);font-size:11.5px">${a.when}</span>
     </div>`).join('') || '<div class="empty" style="padding:16px">Sin actividad todavía</div>';
 }
@@ -232,8 +304,10 @@ btnStart.innerHTML = icon('play',14)+' Iniciar';
 
 function setStatus(mode){
   statusDot.className = 'dot '+mode;
+  const ready = curServer()?.meta?.provision?.status === 'ready';
   if(mode==='online'){ statusText.textContent='En línea'; state.online=true; btnStart.disabled=true; btnStop.disabled=false; btnRestart.disabled=false; }
-  if(mode==='offline'){ statusText.textContent='Detenido'; state.online=false; btnStart.disabled=false; btnStop.disabled=true; btnRestart.disabled=true; }
+  // un servidor a medio crear (o que falló) no se puede arrancar
+  if(mode==='offline'){ statusText.textContent = ready ? 'Detenido' : (curServer() ? 'Sin crear' : 'Sin servidor'); state.online=false; btnStart.disabled=!ready; btnStop.disabled=true; btnRestart.disabled=true; }
   // Detener sigue disponible durante el arranque: si se atasca, hay salida
   if(mode==='starting'){ statusText.textContent='Arrancando…'; btnStart.disabled=true; btnStop.disabled=false; btnRestart.disabled=true; }
 }
@@ -253,12 +327,12 @@ btnRestart.onclick = async ()=>{
 /* =================== CONSOLE =================== */
 const consoleBody = document.getElementById('consoleBody');
 function ts(){ return new Date().toTimeString().slice(0,8); }
-function logLine(type,text){
+function logLine(type,text,time){
   const cls = {info:'tag-info',warn:'tag-warn',err:'tag-err',cmd:'tag-cmd'}[type];
   const tag = {info:'INFO',warn:'WARN',err:'ERROR',cmd:'CMD'}[type];
   const line = document.createElement('div');
   line.className = 'console-line';
-  line.innerHTML = `<span class="time">${ts()}</span> <span class="${cls}">${tag}</span> ${text}`;
+  line.innerHTML = `<span class="time">${time||ts()}</span> <span class="${cls}">${tag}</span> ${text}`;
   consoleBody.appendChild(line);
   if(consoleBody.children.length>300) consoleBody.firstChild.remove();
   if(state.autoscroll) consoleBody.scrollTop = consoleBody.scrollHeight;
@@ -269,11 +343,34 @@ function toggleAutoscroll(){
   document.getElementById('btnAutoscroll').textContent = 'Auto-scroll: '+(state.autoscroll?'ON':'OFF');
 }
 const cmdInput = document.getElementById('cmdInput');
-cmdInput.addEventListener('keydown', e=>{ if(e.key==='Enter') sendCommand(); });
+/* historial de comandos por servidor (flecha arriba / abajo), guardado en el navegador */
+const cmdHistory = { list: [], idx: -1, draft: '' };
+function historyKey(){ return 'craftdeck.cmdHistory.' + (curServerId() || 'none'); }
+function loadCmdHistory(){
+  try { cmdHistory.list = JSON.parse(localStorage.getItem(historyKey()) || '[]'); } catch { cmdHistory.list = []; }
+  cmdHistory.idx = -1; cmdHistory.draft = '';
+}
+function pushCmdHistory(cmd){
+  cmdHistory.list = [cmd, ...cmdHistory.list.filter(c=>c!==cmd)].slice(0, 50);
+  cmdHistory.idx = -1; cmdHistory.draft = '';
+  try { localStorage.setItem(historyKey(), JSON.stringify(cmdHistory.list)); } catch { /* modo privado */ }
+}
+cmdInput.addEventListener('keydown', e=>{
+  if(e.key==='Enter'){ sendCommand(); return; }
+  if(e.key!=='ArrowUp' && e.key!=='ArrowDown') return;
+  if(!cmdHistory.list.length) return;
+  e.preventDefault();
+  if(cmdHistory.idx===-1) cmdHistory.draft = cmdInput.value;
+  if(e.key==='ArrowUp') cmdHistory.idx = Math.min(cmdHistory.idx+1, cmdHistory.list.length-1);
+  else cmdHistory.idx = Math.max(cmdHistory.idx-1, -1);
+  cmdInput.value = cmdHistory.idx===-1 ? cmdHistory.draft : cmdHistory.list[cmdHistory.idx];
+  requestAnimationFrame(()=>cmdInput.setSelectionRange(cmdInput.value.length, cmdInput.value.length));
+});
 async function sendCommand(){
   const cmd = cmdInput.value.trim();
   if(!cmd) return;
   cmdInput.value='';
+  pushCmdHistory(cmd);
   try { await API.post(`/servers/${curServerId()}/command`, { command: cmd }); }
   catch(err){ toast('alert', err.message, 'err'); }
 }
@@ -293,17 +390,17 @@ function renderPlayers(){
     const op = lists.ops.includes(p.name);
     return `
     <div class="player-row" style="animation-delay:${i*0.05}s">
-      <div class="avatar">${p.name[0].toUpperCase()}</div>
+      <div class="avatar">${esc(p.name[0].toUpperCase())}</div>
       <div class="player-info">
-        <div class="player-name">${p.name}
+        <div class="player-name">${esc(p.name)}
           ${op?'<span class="chip amber">OP</span>':''}
         </div>
         <div class="player-meta">${fmtDur(Date.now()-p.joinedAt)} en línea</div>
       </div>
       <div class="player-actions">
-        <button class="icon-btn" title="${op?'Quitar OP':'Dar OP'}" onclick="playerAction('${p.name}','${op?'deop':'op'}')">${icon('crown',14)}</button>
-        <button class="icon-btn red" title="Expulsar" onclick="playerAction('${p.name}','kick')">${icon('logout',14)}</button>
-        <button class="icon-btn red" title="Banear" onclick="playerAction('${p.name}','ban')">${icon('ban',14)}</button>
+        <button class="icon-btn" title="${op?'Quitar OP':'Dar OP'}" onclick="playerAction('${esc(p.name)}','${op?'deop':'op'}')">${icon('crown',14)}</button>
+        <button class="icon-btn red" title="Expulsar" onclick="playerAction('${esc(p.name)}','kick')">${icon('logout',14)}</button>
+        <button class="icon-btn red" title="Banear" onclick="playerAction('${esc(p.name)}','ban')">${icon('ban',14)}</button>
       </div>
     </div>`;
   }).join('');
@@ -393,17 +490,60 @@ function loadResources(){
   document.getElementById('resRamVal').textContent = gb;
   document.getElementById('resCores').value = String(meta.cpuCores || 0);
   document.getElementById('resAutoRestart').checked = meta.autoRestart !== false;
+  document.getElementById('resAutoStart').checked = meta.autoStart !== false;
+  document.getElementById('resAikar').checked = meta.aikarFlags !== false;
+  loadSystemInfo(meta.id).then(()=>updateRamHint('res'));
 }
 async function saveResources(){
   const memoryMb = parseInt(document.getElementById('resRam').value) * 1024;
   const cpuCores = parseInt(document.getElementById('resCores').value);
   const autoRestart = document.getElementById('resAutoRestart').checked;
+  const autoStart = document.getElementById('resAutoStart').checked;
+  const aikarFlags = document.getElementById('resAikar').checked;
   try {
-    const r = await API.put(`/servers/${curServerId()}/settings`, { memoryMb, cpuCores, autoRestart });
+    const r = await API.put(`/servers/${curServerId()}/settings`, { memoryMb, cpuCores, autoRestart, autoStart, aikarFlags });
     const meta = curServer()?.meta;
-    if(meta){ meta.memoryMb = memoryMb; meta.cpuCores = cpuCores; meta.autoRestart = autoRestart; }
+    if(meta){ Object.assign(meta, { memoryMb, cpuCores, autoRestart, autoStart, aikarFlags }); }
+    document.getElementById('statRamMax').textContent = ` / ${(memoryMb/1024).toFixed(0)} GB`;
     toast('cpu', `Rendimiento guardado${r.needsRestart ? ' — se aplica al reiniciar' : ''}`, 'ok');
   } catch(err){ toast('alert', err.message, 'err'); }
+}
+
+/* ---- aviso de RAM: comparar lo que se asigna con lo que le queda al Umbrel ---- */
+state.system = null;
+async function loadSystemInfo(exceptId){
+  try { state.system = await API.get(`/system${exceptId ? `?except=${exceptId}` : ''}`); }
+  catch { state.system = null; }
+  return state.system;
+}
+/** `which` = 'res' (Rendimiento) o 'wz' (asistente de creación). Devuelve true si la asignación no cabe. */
+function updateRamHint(which){
+  const sys = state.system;
+  const el = document.getElementById(which==='res' ? 'resRamHint' : 'wzRamHint');
+  if(!el) return false;
+  if(!sys){ el.textContent=''; el.className='ram-hint'; return false; }
+  const wantMb = which==='res'
+    ? parseInt(document.getElementById('resRam').value) * 1024
+    : parseInt(document.getElementById('wzRam').value);
+  // lo que le quedaría al Umbrel: disponible menos lo que ya usan otros servers encendidos
+  const freeForThis = sys.availableMb - sys.runningServersMb;
+  const left = freeForThis - wantMb;
+  const gb = mb => (mb/1024).toFixed(1).replace(/\.0$/,'');
+  const base = `Tu Umbrel tiene ${gb(sys.totalMb)} GB; ahora mismo hay ${gb(Math.max(0,freeForThis))} GB disponibles` +
+    (sys.runningServersMb ? ` (ya descontados ${gb(sys.runningServersMb)} GB de otros servidores encendidos)` : '') + '.';
+  if(left < 0){
+    el.className = 'ram-hint err';
+    el.textContent = `${base} Con ${gb(wantMb)} GB este servidor no cabe: Linux lo mataría a mitad de partida. Baja la RAM.`;
+    return true;
+  }
+  if(left < 1536){
+    el.className = 'ram-hint warn';
+    el.textContent = `${base} Quedarían solo ${gb(left)} GB para el resto del Umbrel: va justo.`;
+    return false;
+  }
+  el.className = 'ram-hint';
+  el.textContent = `${base} Quedarían ${gb(left)} GB libres.`;
+  return false;
 }
 
 /* =================== STATS TABLE =================== */
@@ -971,6 +1111,7 @@ function renderPlayit(st){
   chip.textContent = st.running ? 'ACTIVO' : 'APAGADO';
   chip.className = 'chip ' + (st.running ? 'green' : 'gray');
   document.getElementById('ptBtn').textContent = st.running ? 'Detener' : 'Arrancar';
+  document.getElementById('ptAuto').checked = !!st.autoStart;
   document.getElementById('ptBody').style.display = st.running ? 'none' : '';
   const claim = document.getElementById('ptClaim');
   if(st.running && st.claimUrl){
@@ -991,6 +1132,13 @@ function renderPlayit(st){
   } else log.style.display = 'none';
 }
 function copyText(t){ navigator.clipboard?.writeText(t); copied(); }
+async function togglePlayitAuto(on){
+  try {
+    await API.put('/playit/settings', { autoStart: on });
+    if(state.playit) state.playit.autoStart = on;
+    toast('wifi', on ? 'El túnel arrancará solo con CraftDeck' : 'El túnel ya no arranca solo', on?'ok':'warn');
+  } catch(err){ toast('alert', err.message, 'err'); document.getElementById('ptAuto').checked = !on; }
+}
 async function togglePlayit(){
   const btn = document.getElementById('ptBtn');
   btn.disabled = true;

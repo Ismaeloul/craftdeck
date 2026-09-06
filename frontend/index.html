@@ -37,6 +37,7 @@
   <!-- ================= MAIN ================= -->
   <main class="main">
     <div class="topbar">
+      <button class="menu-btn" id="menuBtn" title="Menú" aria-label="Abrir menú"><i data-icon="menu" data-size="18"></i></button>
       <h1 id="pageTitle">Dashboard</h1>
       <div class="pill"><span class="dot online" id="statusDot"></span> <span id="statusText">En línea</span></div>
       <div class="actions">
@@ -48,6 +49,16 @@
 
     <!-- ========== DASHBOARD ========== -->
     <section class="section visible" id="sec-dashboard">
+      <div id="provisionBanner" style="display:none"></div>
+      <div class="card addr-card" id="addrCard">
+        <div class="addr-icon"><i data-icon="link" data-size="20"></i></div>
+        <div class="addr-body">
+          <div class="addr-label">Dirección para tus amigos</div>
+          <div class="addr-value" id="addrValue">—</div>
+          <div class="addr-hint" id="addrHint">Sirve dentro de tu red (wifi de casa). Desde fuera: activa el túnel de <a onclick="go('integrations')">playit.gg</a> o abre el puerto en tu router.</div>
+        </div>
+        <button class="btn" id="addrCopy" onclick="copyAddress()"><i data-icon="copy" data-size="14"></i> Copiar</button>
+      </div>
       <div class="grid cols-4" style="margin-bottom:14px;">
         <div class="card">
           <div class="stat-label"><i data-icon="users" data-size="13"></i> Jugadores</div>
@@ -100,7 +111,7 @@
       <div class="console-wrap">
         <div class="console-head">
           <span class="live"><span class="dot online" style="width:7px;height:7px"></span> Consola en vivo</span>
-          <span style="font-family:var(--mono)">latest.log</span>
+          <span style="font-family:var(--mono)" title="Flecha arriba: comandos anteriores">↑ historial</span>
           <span style="margin-left:auto;display:flex;gap:7px;">
             <button class="btn small ghost" onclick="clearConsole()">Limpiar</button>
             <button class="btn small ghost" id="btnAutoscroll" onclick="toggleAutoscroll()">Auto-scroll: ON</button>
@@ -274,7 +285,8 @@
         <h3><i data-icon="cpu" data-size="15"></i> Rendimiento <span class="hint">se aplica al reiniciar</span></h3>
         <div class="grid cols-2" style="margin-top:10px;">
           <div class="field"><label>RAM asignada · <span class="slider-val" id="resRamVal">8</span> GB</label>
-            <div class="slider-row"><input type="range" id="resRam" min="1" max="12" step="1" value="8" oninput="resRamVal.textContent=this.value"></div>
+            <div class="slider-row"><input type="range" id="resRam" min="1" max="12" step="1" value="8" oninput="resRamVal.textContent=this.value; updateRamHint('res')"></div>
+            <p class="ram-hint" id="resRamHint"></p>
           </div>
           <div class="field"><label>Núcleos de CPU</label>
             <select id="resCores">
@@ -291,6 +303,14 @@
         <div class="toggle-row" style="margin-top:10px;">
           <div><div class="t-label">Reinicio automático tras crash</div><div class="t-sub">Si el servidor se cae, CraftDeck lo levanta solo (máximo 3 veces en 10 minutos; si entra en bucle, se pausa y te avisa)</div></div>
           <label class="switch"><input type="checkbox" id="resAutoRestart" checked><span class="track"></span><span class="thumb"></span></label>
+        </div>
+        <div class="toggle-row">
+          <div><div class="t-label">Volver a arrancar con el Umbrel</div><div class="t-sub">Si el servidor estaba encendido cuando el Umbrel se reinicia o CraftDeck se actualiza, se levanta solo</div></div>
+          <label class="switch"><input type="checkbox" id="resAutoStart" checked><span class="track"></span><span class="thumb"></span></label>
+        </div>
+        <div class="toggle-row">
+          <div><div class="t-label">Flags de JVM de Aikar</div><div class="t-sub">Ajustes del recolector de basura pensados para Minecraft: menos tirones de lag con la misma RAM. Desactívalo solo si un mod raro se queja</div></div>
+          <label class="switch"><input type="checkbox" id="resAikar" checked><span class="track"></span><span class="thumb"></span></label>
         </div>
         <button class="btn small primary" style="margin-top:8px;" onclick="saveResources()"><i data-icon="save" data-size="13"></i> Guardar rendimiento</button>
       </div>
@@ -456,6 +476,10 @@
               funciona aunque tu IP cambie.
             </p>
           </div>
+          <div class="toggle-row" style="margin-top:6px;">
+            <div><div class="t-label">Arrancar solo con CraftDeck</div><div class="t-sub">El túnel se levanta él solo tras reiniciar el Umbrel o actualizar la app</div></div>
+            <label class="switch"><input type="checkbox" id="ptAuto" onchange="togglePlayitAuto(this.checked)"><span class="track"></span><span class="thumb"></span></label>
+          </div>
           <div id="ptClaim" style="display:none;margin-top:12px;"></div>
           <div id="ptLog" style="display:none;margin-top:12px;font-family:var(--mono);font-size:11px;color:var(--muted2);background:var(--bg2);border:1px solid var(--border);border-radius:9px;padding:10px 12px;max-height:150px;overflow:auto;line-height:1.7;"></div>
         </div>
@@ -476,6 +500,7 @@
   </main>
 </div>
 
+<div class="sidebar-backdrop" id="sidebarBackdrop" onclick="closeNav()"></div>
 <div class="toast-zone" id="toastZone"></div>
 
 <script src="js/api.js"></script>

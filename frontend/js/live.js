@@ -7,7 +7,17 @@ function classifyLine(line){
   if(/WARN/.test(line)) return 'warn';
   return 'info';
 }
-function logRemote(line){ logLine(classifyLine(line), esc(line)); }
+/* Las líneas de Minecraft ya traen su hora: «[12:34:56] [Server thread/INFO]: …».
+   La usamos como hora de la línea (y no la del navegador, que al recargar sería «ahora» para todas)
+   y quitamos el prefijo del hilo, que la etiqueta INFO/WARN/ERROR ya resume. */
+function logRemote(line){
+  const type = classifyLine(line);
+  let time = null, text = line;
+  const m = text.match(/^\[(\d{2}:\d{2}:\d{2})\]\s*/);
+  if(m){ time = m[1]; text = text.slice(m[0].length); }
+  text = text.replace(/^\[[^\]]*\/(INFO|WARN|ERROR|FATAL|DEBUG)\]:?\s*/, '');
+  logLine(type, esc(text), time);
+}
 
 async function loadConsole(){
   const id = curServerId(); if(!id) return;
@@ -49,6 +59,9 @@ function applyStatus(status){
 
 async function onServerSwitched(){
   state.playersHistory=[]; state.cpuHistory=[]; state.ramHistory=[];
+  loadCmdHistory();
+  renderAddress();
+  renderProvisionBanner();
   await loadConsole();
   const id = curServerId(); if(!id){ setStatus('offline'); setPlayers([]); return; }
   try {

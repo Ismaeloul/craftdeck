@@ -5,15 +5,18 @@ import { pipeline } from 'node:stream/promises';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 
+// Modrinth y Adoptium piden un User-Agent identificable con forma de contactar
+const USER_AGENT = 'Ismaeloul/craftdeck (https://github.com/Ismaeloul/craftdeck)';
+
 export async function fetchJson<T>(url: string): Promise<T> {
-  const res = await fetch(url, { headers: { 'User-Agent': 'craftdeck/0.1' } });
+  const res = await fetch(url, { headers: { 'User-Agent': USER_AGENT } });
   if (!res.ok) throw new Error(`HTTP ${res.status} en ${url}`);
   return res.json() as Promise<T>;
 }
 
 export async function download(url: string, dest: string): Promise<void> {
   await mkdir(path.dirname(dest), { recursive: true });
-  const res = await fetch(url, { headers: { 'User-Agent': 'craftdeck/0.1' } });
+  const res = await fetch(url, { headers: { 'User-Agent': USER_AGENT } });
   if (!res.ok || !res.body) throw new Error(`HTTP ${res.status} descargando ${url}`);
   const tmp = dest + '.part';
   await pipeline(Readable.fromWeb(res.body as never), createWriteStream(tmp));

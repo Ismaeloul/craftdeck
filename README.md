@@ -39,7 +39,8 @@ Los amigos se conectan a `IP-del-umbrel:25565` (o el puerto del servidor creado)
 - `backend/` — API Express + WebSocket en TypeScript. Gestiona procesos Java, catálogos de versiones (Mojang/Fabric/Forge/NeoForge), JREs de Adoptium, backups con retención, eventos programados, Discord y playit.gg.
 - `frontend/` — panel (HTML/CSS/JS vanilla, sin build).
 
-## Estado (v0.4)
+## Estado (v0.5)
 
-Funciona: crear/arrancar/parar servidores, watchdog anti-crash con auto-reinicio y análisis del culpable, consola, comandos, jugadores (OP/kick/ban/whitelist, modo no premium), mods desde Modrinth (explorar/instalar/actualizar/desactivar), mundo, archivos, backups (manuales + diarios con retención), eventos programados, diagnóstico de crashes, integraciones Discord y playit.gg, auditoría.
-Pendiente: mapa en vivo (BlueMap), auto-arranque del túnel playit.
+Funciona: crear/arrancar/parar servidores, watchdog anti-crash con auto-reinicio y análisis del culpable, consola (con historial de comandos), comandos, jugadores (OP/kick/ban/whitelist, modo no premium), mods desde Modrinth (explorar/instalar/actualizar/desactivar), mundo, archivos, backups (manuales + diarios con retención), eventos programados, diagnóstico de crashes, integraciones Discord y playit.gg (con auto-arranque), auditoría.
+Desde 0.5: los servidores que estaban encendidos vuelven solos tras reiniciar el Umbrel o actualizar la app, panel responsive para móvil, dirección para amigos en el Dashboard, flags de JVM de Aikar, avisos de RAM contra la memoria libre real del Umbrel y reintento de creaciones fallidas.
+Pendiente: mapa en vivo (BlueMap).

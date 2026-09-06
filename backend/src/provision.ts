@@ -19,7 +19,7 @@ export async function provisionServer(meta: ServerMeta, broadcast: Broadcast): P
   const dir = serverDir(meta.id);
   const log = async (msg: string) => {
     meta.provision.log.push(msg);
-    await updateServer(meta.id, { provision: meta.provision });
+    await updateServer(meta.id, { provision: meta.provision }).catch(() => {});
     broadcast('provision', { id: meta.id, status: meta.provision.status, msg });
   };
 
@@ -75,7 +75,8 @@ export async function provisionServer(meta: ServerMeta, broadcast: Broadcast): P
   } catch (err) {
     meta.provision.status = 'error';
     meta.provision.error = err instanceof Error ? err.message : String(err);
-    await updateServer(meta.id, { provision: meta.provision });
+    // si el servidor se borró a medio aprovisionar, updateServer lanza: no dejar promesas sin capturar
+    await updateServer(meta.id, { provision: meta.provision }).catch(() => {});
     broadcast('provision', { id: meta.id, status: 'error', msg: meta.provision.error });
     await audit('create', `Falló la creación de ${meta.name}: ${meta.provision.error}`, 'err');
   }

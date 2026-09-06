@@ -25,6 +25,9 @@ export interface ServerMeta {
   backupKeep?: number;  // default 7
   cpuCores?: number;    // 0/ausente = todos los núcleos
   autoRestart?: boolean; // default true — watchdog: reinicia solo tras un crash
+  desiredRunning?: boolean; // estaba encendido la última vez (lo mantiene instance.ts)
+  autoStart?: boolean; // default true — volver a arrancarlo solo tras reiniciar el Umbrel / CraftDeck
+  aikarFlags?: boolean; // default true — flags de JVM de Aikar (G1GC afinado)
   discord?: { url: string; onStatus: boolean; onPlayers: boolean; onBackup: boolean; chatMirror: boolean };
 }
 

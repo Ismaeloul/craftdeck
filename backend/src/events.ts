@@ -55,7 +55,14 @@ export function nextRun(s: Schedule): string {
   const next = new Date(now);
   if (s.kind === 'interval') {
     const n = Math.min(Math.max(s.everyMinutes ?? 60, 5), 1440);
-    next.setMinutes(now.getMinutes() + (n - (now.getMinutes() % n)), 0, 0);
+    if (n < 60) {
+      // cron `*/n * * * *`: siguiente múltiplo de n minutos dentro de la hora
+      next.setMinutes(now.getMinutes() + (n - (now.getMinutes() % n)), 0, 0);
+    } else {
+      // cron `0 */h * * *`: siguiente hora múltiplo de h, en punto
+      const h = Math.round(n / 60);
+      next.setHours(now.getHours() + (h - (now.getHours() % h)), 0, 0, 0);
+    }
     return next.toISOString();
   }
   const [h, m] = (s.time ?? '06:00').split(':').map(Number);

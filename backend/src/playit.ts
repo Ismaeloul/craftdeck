@@ -1,8 +1,8 @@
 import { spawn, ChildProcess } from 'node:child_process';
-import { mkdir, access, chmod } from 'node:fs/promises';
+import { mkdir, access, chmod, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { DATA_DIR } from './paths.js';
-import { download } from './util.js';
+import { download, writeFileAtomic } from './util.js';
 import { audit } from './store.js';
 
 // Agente de playit.gg: túnel para que los amigos entren sin abrir puertos.
@@ -10,15 +10,46 @@ import { audit } from './store.js';
 // el agente a su cuenta y crear el túnel hacia el puerto del server.
 
 const PLAYIT_DIR = path.join(DATA_DIR, 'playit');
+const SETTINGS_FILE = path.join(PLAYIT_DIR, 'settings.json');
 
 interface PlayitState {
   running: boolean;
   claimUrl: string | null;
   lastLines: string[];
+  autoStart: boolean; // arrancar el agente solo cuando arranca CraftDeck
 }
 
 let proc: ChildProcess | null = null;
-const state: PlayitState = { running: false, claimUrl: null, lastLines: [] };
+const state: PlayitState = { running: false, claimUrl: null, lastLines: [], autoStart: false };
+
+async function loadSettings(): Promise<void> {
+  try {
+    const s = JSON.parse(await readFile(SETTINGS_FILE, 'utf8')) as { autoStart?: boolean };
+    state.autoStart = !!s.autoStart;
+  } catch { /* primera vez */ }
+}
+async function saveSettings(): Promise<void> {
+  await mkdir(PLAYIT_DIR, { recursive: true });
+  await writeFileAtomic(SETTINGS_FILE, JSON.stringify({ autoStart: state.autoStart }, null, 2));
+}
+
+export async function setPlayitAutoStart(on: boolean): Promise<void> {
+  state.autoStart = on;
+  await saveSettings();
+  await audit('wifi', on ? 'playit.gg arrancará solo con CraftDeck' : 'playit.gg ya no arranca solo', 'info');
+}
+
+/** Al arrancar CraftDeck: levanta el agente si el usuario lo dejó en auto. */
+export async function initPlayit(): Promise<void> {
+  await loadSettings();
+  if (!state.autoStart) return;
+  try {
+    await startPlayit();
+    console.log('[craftdeck] túnel playit.gg arrancado automáticamente');
+  } catch (err) {
+    console.error('[craftdeck] auto-arranque de playit:', err);
+  }
+}
 type Broadcast = (type: string, payload: unknown) => void;
 let broadcastFn: Broadcast = () => {};
 export function setPlayitBroadcast(fn: Broadcast): void { broadcastFn = fn; }
@@ -72,9 +103,10 @@ export async function startPlayit(): Promise<void> {
   };
   proc.stdout!.on('data', onData);
   proc.stderr!.on('data', onData);
-  proc.on('close', () => {
+  proc.on('close', (code) => {
     proc = null;
     state.running = false;
+    if (code !== null && code !== 0) state.lastLines.push(`[playit] el agente terminó con código ${code}`);
     broadcastFn('playit', { running: false });
   });
   proc.on('error', (err) => {

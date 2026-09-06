@@ -17,6 +17,7 @@ document.body.insertAdjacentHTML('beforeend', `
     </div>
     <div class="field" style="margin-top:13px;"><label>RAM asignada · <span class="slider-val" id="wzRamVal">2048</span> MB</label>
       <div class="slider-row"><input type="range" id="wzRam" min="1024" max="8192" step="512" value="2048"></div>
+      <p class="ram-hint" id="wzRamHint"></p>
     </div>
     <label style="display:flex;align-items:center;gap:9px;margin-top:15px;font-size:12.5px;color:var(--muted2);cursor:pointer;">
       <input type="checkbox" id="wzEula" style="accent-color:var(--accent);width:15px;height:15px;">
@@ -35,7 +36,7 @@ const wzVersion = document.getElementById('wzVersion');
 const wzProgress = document.getElementById('wzProgress');
 let wzCreatingId = null;
 
-document.getElementById('wzRam').oninput = function () { document.getElementById('wzRamVal').textContent = this.value; };
+document.getElementById('wzRam').oninput = function () { document.getElementById('wzRamVal').textContent = this.value; updateRamHint('wz'); };
 document.getElementById('wzCancel').onclick = closeCreateWizard;
 wzOverlay.addEventListener('click', (e) => { if (e.target === wzOverlay && !wzCreatingId) closeCreateWizard(); });
 
@@ -59,6 +60,7 @@ function openCreateWizard() {
   document.getElementById('wzCreate').disabled = false;
   wzOverlay.classList.add('open');
   loadWizardVersions();
+  loadSystemInfo().then(() => updateRamHint('wz'));
 }
 
 function closeCreateWizard() { wzOverlay.classList.remove('open'); }
@@ -72,6 +74,7 @@ document.getElementById('wzCreate').onclick = async () => {
   if (!name) { toast('alert', 'Ponle un nombre al servidor', 'warn'); return; }
   if (!version) { toast('alert', 'Elige una versión', 'warn'); return; }
   if (!acceptEula) { toast('alert', 'Tienes que aceptar la EULA para crear el servidor', 'warn'); return; }
+  if (updateRamHint('wz')) { toast('alert', 'Esa RAM no cabe en tu Umbrel ahora mismo; baja el valor', 'warn'); return; }
 
   document.getElementById('wzCreate').disabled = true;
   wzProgress.style.display = 'block';
@@ -104,7 +107,7 @@ async function refreshServers() {
     if (cur) {
       document.getElementById('ssName').textContent = cur.name;
       document.getElementById('ssSub').textContent = cur.sub;
-      document.getElementById('ssDot').style.background = cur.status === 'online' ? 'var(--accent)' : 'var(--danger)';
+      document.getElementById('ssDot').style.background = serverDotColor(cur);
     } else {
       document.getElementById('ssName').textContent = 'Sin servidores';
       document.getElementById('ssSub').textContent = 'Crea uno para empezar';
@@ -113,12 +116,18 @@ async function refreshServers() {
     if (!window.__liveInit) {
       window.__liveInit = true;
       if (typeof onServerSwitched === 'function') onServerSwitched();
+    } else {
+      renderAddress();
+      renderProvisionBanner();
     }
   } catch (err) {
     console.warn('No se pudo cargar la lista de servidores', err);
   }
 }
 refreshServers();
+
+// la lista cambió en el backend (borrado, reintento de creación…): resincronizar el selector
+onWS((msg) => { if (msg.type === 'servers') refreshServers(); });
 
 onWS((msg) => {
   if (msg.type !== 'provision' || msg.id !== wzCreatingId) return;

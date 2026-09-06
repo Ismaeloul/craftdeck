@@ -1,5 +1,6 @@
 import { mkdir, readdir, rm, access } from 'node:fs/promises';
 import path from 'node:path';
+import extractZip from 'extract-zip';
 import { RUNTIMES_DIR, CACHE_DIR } from './paths.js';
 import { fetchJson, download, run } from './util.js';
 
@@ -57,9 +58,13 @@ export async function ensureJre(major: number, log: (msg: string) => void): Prom
   log(`Extrayendo ${pkg.name}…`);
   await rm(jreDir, { recursive: true, force: true });
   await mkdir(jreDir, { recursive: true });
-  // tar de sistema: en Windows 10+ bsdtar también abre .zip
-  const code = await run('tar', ['-xf', archive, '-C', jreDir]);
-  if (code !== 0) throw new Error(`Fallo extrayendo el JRE (tar exit ${code})`);
+  if (pkg.name.endsWith('.zip')) {
+    // Windows: Adoptium entrega .zip y el tar del PATH (p. ej. el de Git Bash) no sabe abrirlos
+    await extractZip(archive, { dir: jreDir });
+  } else {
+    const code = await run('tar', ['-xf', archive, '-C', jreDir]);
+    if (code !== 0) throw new Error(`Fallo extrayendo el JRE (tar exit ${code})`);
+  }
   await rm(archive, { force: true });
 
   const bin = await findJavaBin(jreDir, exe);

@@ -12,8 +12,10 @@ import { listForgeVersions } from './catalog/forge.js';
 import { listNeoForgeVersions } from './catalog/neoforge.js';
 import { provisionServer } from './provision.js';
 import {
-  setBroadcast, runtimeOf, consoleOf, startServer, stopServer, sendCommand, stopAll, announceInGame, assertNotBusy,
+  setBroadcast, runtimeOf, consoleForPanel, startServer, stopServer, sendCommand, stopAll, announceInGame, assertNotBusy,
+  autoStartServers, runningMemoryMb,
 } from './instance.js';
+import { systemMemory } from './system.js';
 import { playerLists, playerAction, whitelistAdd, whitelistRemove } from './players.js';
 import {
   listBackups, makeBackup, restoreBackup, deleteBackup, backupFilePath,
@@ -30,7 +32,7 @@ import {
   listEvents, addEvent, toggleEvent, deleteEvent, removeEventsOfServer, initEvents, EventType, Schedule,
 } from './events.js';
 import { testWebhook } from './discord.js';
-import { playitStatus, startPlayit, stopPlayit, setPlayitBroadcast } from './playit.js';
+import { playitStatus, startPlayit, stopPlayit, setPlayitBroadcast, setPlayitAutoStart, initPlayit } from './playit.js';
 import {
   Loader, ServerMeta, listServers, getServer, addServer, removeServer, updateServer,
   serverDir, nextFreePort, audit, readAudit,
@@ -40,7 +42,8 @@ const PORT = Number(process.env.PORT ?? 8449);
 const LOADERS: Loader[] = ['vanilla', 'fabric', 'forge', 'neoforge'];
 
 const app = express();
-app.use(express.json());
+// el editor de archivos admite hasta 512 KB; el límite por defecto (100 KB) devolvía 413 al guardar
+app.use(express.json({ limit: '2mb' }));
 
 // ---- eventos en vivo ----
 const httpServer = createServer(app);
@@ -61,6 +64,18 @@ const asyncRoute = (fn: (req: express.Request, res: express.Response) => Promise
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, name: 'craftdeck', version: APP_VERSION });
 });
+
+// ---- sistema: RAM del Umbrel para avisar antes de asignar más de la que hay ----
+app.get('/api/system', asyncRoute(async (req, res) => {
+  const mem = await systemMemory();
+  const exceptId = typeof req.query.except === 'string' ? req.query.except : undefined;
+  res.json({
+    ...mem,
+    cpus: os.cpus().length,
+    // RAM ya comprometida por los servidores encendidos (sin contar el que se está ajustando)
+    runningServersMb: await runningMemoryMb(exceptId),
+  });
+}));
 
 // ---- catálogo de versiones ----
 app.get('/api/catalog/:loader', asyncRoute(async (req, res) => {
@@ -122,7 +137,20 @@ app.post('/api/servers/:id/command', asyncRoute(async (req, res) => {
 }));
 
 app.get('/api/servers/:id/console', asyncRoute(async (req, res) => {
-  res.json({ lines: consoleOf(req.params.id!) });
+  res.json({ lines: await consoleForPanel(req.params.id!) });
+}));
+
+// ---- reintentar un aprovisionado que falló (sin tener que borrar y crear de nuevo) ----
+app.post('/api/servers/:id/provision/retry', asyncRoute(async (req, res) => {
+  const meta = await getServer(req.params.id!);
+  if (!meta) { res.status(404).json({ error: 'Servidor no encontrado' }); return; }
+  if (meta.provision.status !== 'error') { res.status(400).json({ error: 'Este servidor no tiene una creación fallida que reintentar' }); return; }
+  meta.provision = { status: 'creating', log: [] };
+  await updateServer(meta.id, { provision: meta.provision });
+  await audit('refresh', `Reintentó la creación de ${meta.name}`, 'info');
+  void provisionServer(meta, broadcast);
+  broadcast('servers', {});
+  res.json({ ok: true });
 }));
 
 // ---- jugadores ----
@@ -212,10 +240,14 @@ app.delete('/api/servers/:id/whitelist/:name', asyncRoute(async (req, res) => {
 
 // ---- rendimiento (RAM y núcleos, se aplica al reiniciar) ----
 app.put('/api/servers/:id/settings', asyncRoute(async (req, res) => {
-  const { memoryMb, cpuCores, autoRestart } = req.body as { memoryMb?: number; cpuCores?: number; autoRestart?: boolean };
+  const { memoryMb, cpuCores, autoRestart, autoStart, aikarFlags } = req.body as {
+    memoryMb?: number; cpuCores?: number; autoRestart?: boolean; autoStart?: boolean; aikarFlags?: boolean;
+  };
   const meta = await getServer(req.params.id!);
   if (!meta) { res.status(404).json({ error: 'Servidor no encontrado' }); return; }
   const patch: Partial<ServerMeta> = {};
+  if (autoStart !== undefined) patch.autoStart = !!autoStart;
+  if (aikarFlags !== undefined) patch.aikarFlags = !!aikarFlags;
   if (memoryMb !== undefined) {
     if (!Number.isInteger(memoryMb) || memoryMb < 1024 || memoryMb > 16384) { res.status(400).json({ error: 'RAM inválida (1–16 GB)' }); return; }
     patch.memoryMb = memoryMb;
@@ -231,6 +263,8 @@ app.put('/api/servers/:id/settings', asyncRoute(async (req, res) => {
   if (patch.memoryMb) bits.push(`${(patch.memoryMb / 1024).toFixed(0)} GB de RAM`);
   if (patch.cpuCores !== undefined) bits.push(patch.cpuCores === 0 ? 'todos los núcleos' : `${patch.cpuCores} núcleos`);
   if (patch.autoRestart !== undefined) bits.push(patch.autoRestart ? 'auto-reinicio tras crash activado' : 'auto-reinicio tras crash desactivado');
+  if (patch.autoStart !== undefined) bits.push(patch.autoStart ? 'arranque automático con el Umbrel activado' : 'arranque automático con el Umbrel desactivado');
+  if (patch.aikarFlags !== undefined) bits.push(patch.aikarFlags ? 'flags de Aikar activados' : 'flags de Aikar desactivados');
   if (bits.length) await audit('cpu', `Ajustó el rendimiento de ${meta.name}: ${bits.join(', ')}`, 'info');
   res.json({ ok: true, needsRestart: runtimeOf(meta.id).status !== 'offline' });
 }));
@@ -480,6 +514,13 @@ app.post('/api/playit/stop', asyncRoute(async (_req, res) => {
   res.json({ ok: true });
 }));
 
+app.put('/api/playit/settings', asyncRoute(async (req, res) => {
+  const { autoStart } = req.body as { autoStart?: boolean };
+  if (typeof autoStart !== 'boolean') { res.status(400).json({ error: 'Falta autoStart' }); return; }
+  await setPlayitAutoStart(autoStart);
+  res.json({ ok: true });
+}));
+
 // ---- auditoría ----
 app.get('/api/audit', asyncRoute(async (_req, res) => {
   res.json(await readAudit());
@@ -495,6 +536,9 @@ void initEvents();
 
 httpServer.listen(PORT, () => {
   console.log(`[craftdeck] panel en http://localhost:${PORT}`);
+  // tras un reinicio del Umbrel o una actualización: levantar lo que estaba encendido
+  void initPlayit();
+  void autoStartServers();
 });
 
 // parada limpia: detener los servidores antes de salir
