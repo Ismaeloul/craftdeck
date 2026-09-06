@@ -3,7 +3,12 @@ import path from 'node:path';
 import { DATA_DIR, SERVERS_DIR } from './paths.js';
 import { writeFileAtomic } from './util.js';
 
-export type Loader = 'vanilla' | 'fabric' | 'forge' | 'neoforge';
+export type Loader = 'vanilla' | 'paper' | 'fabric' | 'forge' | 'neoforge';
+
+/** Carpeta de contenido: los servidores de plugins (Paper) usan plugins/, los de mods mods/. */
+export function contentDirName(loader: Loader): 'mods' | 'plugins' { return loader === 'paper' ? 'plugins' : 'mods'; }
+/** Vanilla puro no admite nada; el resto sí (plugins o mods). */
+export function supportsContent(loader: Loader): boolean { return loader !== 'vanilla'; }
 
 export type LaunchSpec =
   | { type: 'jar'; jar: string }
@@ -29,6 +34,11 @@ export interface ServerMeta {
   autoStart?: boolean; // default true — volver a arrancarlo solo tras reiniciar el Umbrel / CraftDeck
   aikarFlags?: boolean; // default true — flags de JVM de Aikar (G1GC afinado)
   publicAddress?: string; // «dominio:puerto» con el que entran los amigos desde fuera (redirección del router, playit…)
+  pinnedLoaderVersion?: string; // versión exacta del loader que pide un modpack (se usa al aprovisionar)
+  modpack?: { project: string; name: string; versionId: string; versionNumber: string }; // de dónde salió el servidor
+  backupTime?: string;   // "HH:MM" del backup automático (default 04:00)
+  backupDays?: number[]; // días de la semana (0=domingo); ausente = todos los días
+  mapPort?: number;      // puerto local del webserver de BlueMap (solo dentro del contenedor)
   discord?: { url: string; onStatus: boolean; onPlayers: boolean; onBackup: boolean; chatMirror: boolean };
 }
 

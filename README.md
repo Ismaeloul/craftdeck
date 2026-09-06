@@ -2,7 +2,7 @@
 
 Panel de control de servidores de Minecraft para umbrelOS (y cualquier máquina con Docker o Node).
 
-Crea servidores **Vanilla, Fabric, Forge o NeoForge** eligiendo versión de una lista — CraftDeck descarga el Java correcto (Temurin) y el jar del servidor por ti. Consola en vivo, jugadores (OP/kick/ban/whitelist), edición visual de `server.properties`, editor de configs y backups manuales + automáticos.
+Crea servidores **Vanilla, Paper (plugins), Fabric, Forge o NeoForge** eligiendo versión de una lista, o desde un **modpack de Modrinth** — CraftDeck descarga el Java correcto (Temurin) y el jar del servidor por ti. Consola en vivo, jugadores (OP/kick/ban/whitelist, historial), mods y plugins de Modrinth, mapa en vivo con BlueMap, edición visual de `server.properties`, editor de configs y backups manuales + automáticos.
 
 ## Desarrollo (Windows/Mac/Linux)
 
@@ -39,8 +39,9 @@ Los amigos se conectan a `IP-del-umbrel:25565` (o el puerto del servidor creado)
 - `backend/` — API Express + WebSocket en TypeScript. Gestiona procesos Java, catálogos de versiones (Mojang/Fabric/Forge/NeoForge), JREs de Adoptium, backups con retención, eventos programados, Discord y playit.gg.
 - `frontend/` — panel (HTML/CSS/JS vanilla, sin build).
 
-## Estado (v0.5)
+## Estado (v0.6)
 
-Funciona: crear/arrancar/parar servidores, watchdog anti-crash con auto-reinicio y análisis del culpable, consola (con historial de comandos), comandos, jugadores (OP/kick/ban/whitelist, modo no premium), mods desde Modrinth (explorar/instalar/actualizar/desactivar), mundo, archivos, backups (manuales + diarios con retención), eventos programados, diagnóstico de crashes, integraciones Discord y playit.gg (con auto-arranque), auditoría.
-Desde 0.5: los servidores que estaban encendidos vuelven solos tras reiniciar el Umbrel o actualizar la app, panel responsive para móvil, dirección para amigos en el Dashboard, flags de JVM de Aikar, avisos de RAM contra la memoria libre real del Umbrel y reintento de creaciones fallidas.
-Pendiente: mapa en vivo (BlueMap).
+Funciona: crear/arrancar/parar servidores (Vanilla, Paper, Fabric, Forge, NeoForge, o desde un modpack .mrpack de Modrinth), cambio de versión de Minecraft conservando el mundo (con migración de mods), watchdog anti-crash con auto-reinicio y análisis del culpable, consola (historial de comandos, filtro y buscador), jugadores (OP/kick/ban/whitelist, modo no premium, caras, historial de conexiones), mods y plugins desde Modrinth (explorar/instalar/actualizar/desactivar/subir .jar), pack de amigos en .zip y .mrpack, mapa en vivo con BlueMap (proxy dentro del panel), mundo (importar .zip), archivos, backups (manuales, automáticos a la hora y días elegidos, retención, restaurar solo mundo o todo, subir .zip), eventos programados, diagnóstico de crashes, integraciones Discord y playit.gg (auto-arranque y túneles detectados), página «Todos los servidores», auditoría, panel responsive.
+Los servidores que estaban encendidos vuelven solos tras reiniciar el Umbrel o actualizar la app.
+
+Cómo se sirve el mapa: BlueMap escucha solo en 127.0.0.1 dentro del contenedor (puerto 8100 + índice del servidor) y el backend hace de proxy en `/api/servers/:id/map/view/`, así que no hace falta abrir más puertos en el compose.

@@ -5,9 +5,11 @@ import pidusage from 'pidusage';
 import { APP_VERSION } from './paths.js';
 import { ServerMeta, getServer, listServers, updateServer, serverDir, audit } from './store.js';
 import { discordEvent } from './discord.js';
-import { latestCrash } from './crashes.js';
+import { latestCrash, pruneCrashReports } from './crashes.js';
 import { ensureJre, pickJavaMajor } from './java.js';
 import { getVanillaVersionInfo } from './catalog/vanilla.js';
+import { recordPlayerEvent } from './players-history.js';
+import { prepareBlueMapConfig } from './bluemap.js';
 
 export type RunStatus = 'offline' | 'starting' | 'online' | 'stopping';
 type Broadcast = (type: string, payload: unknown) => void;
@@ -140,12 +142,14 @@ function pushLine(id: string, i: Instance, line: string): void {
     if (!i.players.some((p) => p.name === m![1])) i.players.push({ name: m[1]!, joinedAt: Date.now() });
     broadcastFn('players', { id, players: i.players });
     void discordEvent(id, 'join', m[1]!);
+    void recordPlayerEvent(id, m[1]!, 'join');
   }
   m = line.match(/\]:?\s(\S{1,16}) left the game/);
   if (m) {
     i.players = i.players.filter((p) => p.name !== m![1]);
     broadcastFn('players', { id, players: i.players });
     void discordEvent(id, 'leave', m[1]!);
+    void recordPlayerEvent(id, m[1]!, 'leave');
   }
   m = line.match(/\]:?\s<(\S{1,16})> (.*)$/);
   if (m) void discordEvent(id, 'chat', `**${m[1]}** ${m[2]}`);
@@ -205,6 +209,7 @@ async function handleCrash(id: string, i: Instance, meta: ServerMeta, code: numb
 
   const oomHint = code === null ? ' El sistema mató el proceso (¿se quedó el Umbrel sin memoria? prueba a bajar la RAM asignada).' : '';
   const crash = await latestCrash(id, (startedAt ?? now) - 60_000).catch(() => null);
+  void pruneCrashReports(id).catch(() => {}); // que crash-reports/ no crezca sin límite
   const culpritTxt = crash && crash.culprit !== 'Desconocido' ? ` Culpable probable: «${crash.culprit}».` : '';
 
   const autoRestart = meta.autoRestart !== false;
@@ -258,6 +263,8 @@ export async function startServer(id: string): Promise<void> {
   }
   const java = await ensureJre(javaMajor, (m) => pushLine(id, i, `[CraftDeck] ${m}`));
   if (i.proc) throw new Error('El servidor ya está en marcha'); // otro arranque ganó mientras descargábamos Java
+  // si BlueMap está instalado, dejarle la config hecha antes de que arranque (puerto local, descarga aceptada)
+  await prepareBlueMapConfig(meta).catch((err) => pushLine(id, i, `[CraftDeck] Aviso: no pude preparar BlueMap: ${err instanceof Error ? err.message : err}`));
   i.status = 'starting';
   i.startedAt = Date.now();
   i.players = [];

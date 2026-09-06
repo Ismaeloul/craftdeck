@@ -472,3 +472,38 @@
   .console-head { flex-wrap:wrap; row-gap:6px; }
   .console-head > span[title] { display:none; } /* la pista «↑ historial» sobra en pantallas pequeñas */
 }
+
+/* ============ ZONAS DE SUBIDA ============ */
+.dropzone {
+  border:1.5px dashed var(--border-hover); border-radius:10px; padding:14px 16px; margin-top:12px;
+  font-size:12.5px; color:var(--muted2); text-align:center; transition:all .18s; line-height:1.7;
+}
+.dropzone.over { border-color:var(--accent); background:var(--accent-dim); color:var(--text); }
+.dropzone b { color:var(--text); }
+
+/* ============ TODOS LOS SERVIDORES ============ */
+.srv-card { display:flex; flex-direction:column; gap:12px; cursor:pointer; }
+.srv-card.current { border-color:rgba(52,211,153,.4); }
+.srv-head { display:flex; align-items:center; gap:12px; }
+.srv-name { font-size:15px; font-weight:650; }
+.srv-sub { font-size:12px; color:var(--muted); margin-top:2px; }
+.srv-stats { display:flex; gap:16px; font-size:12px; color:var(--muted2); flex-wrap:wrap; }
+.srv-stats b { color:var(--text); font-weight:620; }
+.srv-actions { display:flex; gap:8px; flex-wrap:wrap; }
+
+/* ============ JUGADORES: caras y filas del historial ============ */
+.avatar img { width:100%; height:100%; border-radius:9px; image-rendering:pixelated; display:block; }
+.hist-row { display:flex; align-items:center; gap:10px; padding:7px 0; border-bottom:1px solid rgba(255,255,255,.04); font-size:12.5px; }
+.hist-row:last-child { border-bottom:none; }
+.hist-row .who { flex:1; font-weight:600; }
+.hist-row .when { color:var(--muted); font-size:11.5px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.hist-row .mini-avatar { width:22px; height:22px; border-radius:6px; image-rendering:pixelated; flex-shrink:0; background:rgba(255,255,255,.05); }
+
+/* ============ CONSOLA: filtro ============ */
+.console-line.hidden { display:none; }
+.console-line mark { background:var(--warn-dim); color:var(--warn); border-radius:3px; padding:0 1px; }
+@media (max-width: 900px) {
+  #consoleSearch { width:100% !important; order:5; }
+  #consoleFilter { order:4; }
+  #mapFrame { height:70vh !important; }
+}

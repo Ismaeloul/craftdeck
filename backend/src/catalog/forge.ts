@@ -24,10 +24,10 @@ export async function listForgeVersions(): Promise<{ mc: string; forge: string }
     .sort((a, b) => cmpVersion(b.mc, a.mc));
 }
 
-export async function getForgeInstaller(mc: string): Promise<{ url: string; loaderVersion: string }> {
-  const versions = await listForgeVersions();
-  const hit = versions.find((v) => v.mc === mc);
-  if (!hit) throw new Error(`Forge no soporta Minecraft ${mc}`);
-  const full = `${mc}-${hit.forge}`;
-  return { url: `${MAVEN}/${full}/forge-${full}-installer.jar`, loaderVersion: hit.forge };
+/** `pin`: versión exacta de Forge (modpacks); el artefacto de maven se llama mc-forge. */
+export async function getForgeInstaller(mc: string, pin?: string): Promise<{ url: string; loaderVersion: string }> {
+  const forge = pin ?? (await listForgeVersions()).find((v) => v.mc === mc)?.forge;
+  if (!forge) throw new Error(`Forge no soporta Minecraft ${mc}`);
+  const full = `${mc}-${forge}`;
+  return { url: `${MAVEN}/${full}/forge-${full}-installer.jar`, loaderVersion: forge };
 }

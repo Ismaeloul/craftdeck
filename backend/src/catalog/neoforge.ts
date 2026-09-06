@@ -26,12 +26,12 @@ export async function listNeoForgeVersions(): Promise<{ mc: string; neoforge: st
     .sort((a, b) => cmpVersion(b.mc, a.mc));
 }
 
-export async function getNeoForgeInstaller(mc: string): Promise<{ url: string; loaderVersion: string }> {
-  const versions = await listNeoForgeVersions();
-  const hit = versions.find((v) => v.mc === mc);
-  if (!hit) throw new Error(`NeoForge no soporta Minecraft ${mc}`);
+/** `pin`: versión exacta de NeoForge (modpacks). */
+export async function getNeoForgeInstaller(mc: string, pin?: string): Promise<{ url: string; loaderVersion: string }> {
+  const neoforge = pin ?? (await listNeoForgeVersions()).find((v) => v.mc === mc)?.neoforge;
+  if (!neoforge) throw new Error(`NeoForge no soporta Minecraft ${mc}`);
   return {
-    url: `${MAVEN}/${hit.neoforge}/neoforge-${hit.neoforge}-installer.jar`,
-    loaderVersion: hit.neoforge,
+    url: `${MAVEN}/${neoforge}/neoforge-${neoforge}-installer.jar`,
+    loaderVersion: neoforge,
   };
 }

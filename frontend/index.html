@@ -47,6 +47,16 @@
       </div>
     </div>
 
+    <!-- ========== TODOS LOS SERVIDORES ========== -->
+    <section class="section" id="sec-servers">
+      <div class="section-head">
+        <h2>Todos los servidores</h2>
+        <p id="serversSubtitle">Arranca, para o entra en cualquiera sin cambiar de servidor</p>
+        <div class="right"><button class="btn primary" onclick="openCreateWizard()"><i data-icon="plus" data-size="14"></i> Crear servidor</button></div>
+      </div>
+      <div class="grid cols-2" id="serversGrid"></div>
+    </section>
+
     <!-- ========== DASHBOARD ========== -->
     <section class="section visible" id="sec-dashboard">
       <div id="provisionBanner" style="display:none"></div>
@@ -123,7 +133,12 @@
       <div class="console-wrap">
         <div class="console-head">
           <span class="live"><span class="dot online" style="width:7px;height:7px"></span> Consola en vivo</span>
-          <span style="font-family:var(--mono)" title="Flecha arriba: comandos anteriores">↑ historial</span>
+          <span class="tabs" style="margin:0;padding:3px;" id="consoleFilter">
+            <span class="tab active" data-lvl="all" onclick="setConsoleFilter('all')" style="padding:4px 10px;font-size:12px">Todo</span>
+            <span class="tab" data-lvl="warn" onclick="setConsoleFilter('warn')" style="padding:4px 10px;font-size:12px">Avisos y errores</span>
+            <span class="tab" data-lvl="err" onclick="setConsoleFilter('err')" style="padding:4px 10px;font-size:12px">Solo errores</span>
+          </span>
+          <input type="text" id="consoleSearch" placeholder="Buscar en la consola…" oninput="applyConsoleFilter()" style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:5px 10px;color:var(--text);font-size:12px;font-family:inherit;outline:none;width:180px;">
           <span style="margin-left:auto;display:flex;gap:7px;">
             <button class="btn small ghost" onclick="clearConsole()">Limpiar</button>
             <button class="btn small ghost" id="btnAutoscroll" onclick="toggleAutoscroll()">Auto-scroll: ON</button>
@@ -147,6 +162,16 @@
         </div>
       </div>
       <div class="card" style="padding:10px;"><div id="playerList"></div></div>
+      <div class="grid cols-2" style="margin-top:14px; align-items:start;">
+        <div class="card">
+          <h3><i data-icon="clock" data-size="15"></i> Últimas conexiones <span class="hint">entradas y salidas</span></h3>
+          <div id="playerRecent"></div>
+        </div>
+        <div class="card">
+          <h3><i data-icon="users" data-size="15"></i> Jugadores conocidos <span class="hint">última vez visto</span></h3>
+          <div id="playerKnown"></div>
+        </div>
+      </div>
       <div class="grid cols-2" style="margin-top:14px; align-items:start;">
         <div class="card">
           <h3><i data-icon="shield" data-size="15"></i> Whitelist <span class="chip gray" id="wlChip">DESACTIVADA</span></h3>
@@ -192,32 +217,27 @@
     <section class="section" id="sec-map">
       <div class="section-head">
         <h2>Mapa en vivo</h2>
-        <p>Próximamente · integración con BlueMap para ver tu mundo real y a los jugadores</p>
+        <p>BlueMap · tu mundo real en 3D, con los jugadores moviéndose</p>
+        <div class="right">
+          <button class="btn small" id="mapRefresh" onclick="loadMap()"><i data-icon="refresh" data-size="13"></i> Recargar</button>
+          <a class="btn small" id="mapOpen" href="#" target="_blank" rel="noopener" style="display:none"><i data-icon="link" data-size="13"></i> Abrir en pestaña</a>
+        </div>
       </div>
-      <div class="map-wrap">
-        <canvas id="mapCanvas"></canvas>
-        <div class="map-overlay">
-          <div class="map-chip"><i data-icon="crosshair" data-size="13" style="color:var(--muted)"></i> <span id="mapCoords" style="font-family:var(--mono)">0, 0</span></div>
-        </div>
-        <div class="map-legend">
-          <span><i style="background:#2563eb"></i>Océano</span>
-          <span><i style="background:#d4c27a"></i>Playa</span>
-          <span><i style="background:#4d7c3a"></i>Llanura</span>
-          <span><i style="background:#2d5426"></i>Bosque</span>
-          <span><i style="background:#6b7280"></i>Montaña</span>
-          <span><i style="background:#e5e7eb"></i>Nieve</span>
-        </div>
+      <div id="mapState" class="card" style="margin-bottom:14px;"></div>
+      <div class="map-wrap" id="mapFrameWrap" style="display:none;">
+        <iframe id="mapFrame" src="about:blank" style="width:100%;height:640px;border:0;display:block;background:#0a0f14"></iframe>
       </div>
     </section>
 
     <!-- ========== MODS ========== -->
     <section class="section" id="sec-mods">
       <div class="section-head">
-        <h2>Mods</h2>
+        <h2 id="modsTitle">Mods</h2>
         <p>Loader: <span class="chip blue" id="modLoaderChip">—</span> · fuente: Modrinth · dependencias automáticas</p>
         <div class="right">
           <button class="btn" onclick="checkUpdates()"><i data-icon="refresh" data-size="14"></i> Buscar actualizaciones</button>
-          <button class="btn primary" onclick="downloadFriendsZip()" title="Descarga un .zip con todos los mods activos del servidor, para el cliente de tus amigos"><i data-icon="download" data-size="14"></i> Pack .zip para amigos</button>
+          <button class="btn" id="btnPackZip" onclick="downloadFriendsZip()" title="Un .zip con los jars activos, para meterlos a mano en la carpeta mods del cliente"><i data-icon="download" data-size="14"></i> Pack .zip</button>
+          <button class="btn primary" id="btnPackMrpack" onclick="downloadFriendsMrpack()" title="Formato .mrpack: Prism, Modrinth App o ATLauncher lo importan y montan el cliente solos"><i data-icon="download" data-size="14"></i> Pack .mrpack para amigos</button>
         </div>
       </div>
       <div class="tabs">
@@ -251,6 +271,11 @@
             <input type="text" id="installedSearch" placeholder="Filtrar tus mods instalados…" oninput="state.installedPage=0; renderInstalledMods()">
           </div>
           <button class="btn primary" id="btnUpdateAll" style="display:none" onclick="updateAllMods()"><i data-icon="refresh" data-size="13"></i> Actualizar todo</button>
+          <button class="btn" onclick="document.getElementById('modUploadInput').click()" title="Un .jar que no está en Modrinth (por ejemplo de CurseForge)"><i data-icon="upload" data-size="13"></i> Subir .jar</button>
+          <input type="file" id="modUploadInput" accept=".jar" multiple style="display:none" onchange="uploadMods(this.files); this.value=''">
+        </div>
+        <div class="dropzone" id="modDrop" ondragover="event.preventDefault(); this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="event.preventDefault(); this.classList.remove('over'); uploadMods(event.dataTransfer.files)">
+          Arrastra aquí archivos <b>.jar</b> para subirlos al servidor
         </div>
         <div class="card" id="installedMods" style="padding:10px;"></div>
         <div id="installedPager" style="display:flex;gap:6px;align-items:center;justify-content:center;margin-top:14px;flex-wrap:wrap;"></div>
@@ -326,6 +351,38 @@
           <label class="switch"><input type="checkbox" id="resAikar" checked><span class="track"></span><span class="thumb"></span></label>
         </div>
         <button class="btn small primary" style="margin-top:8px;" onclick="saveResources()"><i data-icon="save" data-size="13"></i> Guardar rendimiento</button>
+      </div>
+      <div class="grid cols-2" style="margin-top:14px; align-items:start;">
+        <div class="card">
+          <h3><i data-icon="refresh" data-size="15"></i> Versión de Minecraft <span class="hint" id="verCurrent"></span></h3>
+          <p style="font-size:12.5px;color:var(--muted2);line-height:1.6;margin-bottom:12px;">
+            Cambia de versión conservando el mundo, jugadores y configuración. Antes se hace un backup completo.
+            Los mods gestionados se pasan a una versión compatible; los que no la tengan se desactivan y te lo digo.
+          </p>
+          <div class="form-grid">
+            <div class="field" id="verLoaderField"><label>Tipo</label>
+              <select id="verLoader" onchange="loadVersionOptions()"></select>
+            </div>
+            <div class="field"><label>Nueva versión</label>
+              <select id="verSelect"><option>Cargando…</option></select>
+            </div>
+          </div>
+          <p class="ram-hint warn" style="margin-top:8px;">Bajar de versión no suele funcionar: los mundos no van hacia atrás. Solo hacia arriba, y con el servidor detenido.</p>
+          <button class="btn small primary" style="margin-top:10px;" onclick="armAction(this, changeVersion)"><i data-icon="refresh" data-size="13"></i> Cambiar de versión</button>
+        </div>
+        <div class="card">
+          <h3><i data-icon="upload" data-size="15"></i> Importar un mundo</h3>
+          <p style="font-size:12.5px;color:var(--muted2);line-height:1.6;margin-bottom:12px;">
+            Sube un mundo en <b>.zip</b> (la carpeta del mundo con su <span style="font-family:var(--mono)">level.dat</span>, o un mundo de un servidor con nether y end).
+            Sustituye al mundo actual, así que CraftDeck hace antes un backup. El servidor debe estar detenido.
+          </p>
+          <div class="dropzone" id="worldDrop" ondragover="event.preventDefault(); this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="event.preventDefault(); this.classList.remove('over'); uploadWorld(event.dataTransfer.files[0])">
+            Arrastra aquí el <b>.zip</b> del mundo, o
+            <button class="btn small" style="margin-left:6px" onclick="document.getElementById('worldUploadInput').click()">elígelo</button>
+            <input type="file" id="worldUploadInput" accept=".zip" style="display:none" onchange="uploadWorld(this.files[0]); this.value=''">
+          </div>
+          <div id="worldUploadProgress" class="ram-hint"></div>
+        </div>
       </div>
       <div class="card" style="margin-top:14px; border-color:rgba(248,113,113,.25);">
         <h3 style="color:var(--danger)"><i data-icon="alert" data-size="15"></i> Zona peligrosa</h3>
@@ -432,7 +489,22 @@
           </select>
         </div>
       </div>
+      <div class="card" style="margin-bottom:14px;">
+        <h3><i data-icon="calendar" data-size="15"></i> Cuándo se hace el automático</h3>
+        <div class="form-grid">
+          <div class="field"><label>Hora (hora local del Umbrel)</label><input type="time" id="bkTime" value="04:00" onchange="saveBackupSchedule()"></div>
+          <div class="field"><label>Días</label><div class="day-chips" id="bkDays"></div></div>
+        </div>
+        <p class="ram-hint" id="bkSchedHint"></p>
+      </div>
       <div class="card" style="padding:10px;"><div id="backupList"></div></div>
+      <div class="dropzone" id="backupDrop" style="margin-top:14px;" ondragover="event.preventDefault(); this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="event.preventDefault(); this.classList.remove('over'); uploadBackup(event.dataTransfer.files[0])">
+        ¿Tienes un backup descargado? Arrastra aquí el <b>.zip</b> o
+        <button class="btn small" style="margin-left:6px" onclick="document.getElementById('backupUploadInput').click()">elígelo</button>
+        para volver a tenerlo en la lista y poder restaurarlo.
+        <input type="file" id="backupUploadInput" accept=".zip" style="display:none" onchange="uploadBackup(this.files[0]); this.value=''">
+        <div id="backupUploadProgress" class="ram-hint"></div>
+      </div>
     </section>
 
     <!-- ========== CRASHES ========== -->
@@ -501,6 +573,7 @@
             <label class="switch"><input type="checkbox" id="ptAuto" onchange="togglePlayitAuto(this.checked)"><span class="track"></span><span class="thumb"></span></label>
           </div>
           <div id="ptClaim" style="display:none;margin-top:12px;"></div>
+          <div id="ptTunnels" style="display:none;margin-top:12px;"></div>
           <div id="ptLog" style="display:none;margin-top:12px;font-family:var(--mono);font-size:11px;color:var(--muted2);background:var(--bg2);border:1px solid var(--border);border-radius:9px;padding:10px 12px;max-height:150px;overflow:auto;line-height:1.7;"></div>
         </div>
 
@@ -528,5 +601,6 @@
 <script src="js/live.js"></script>
 <script src="js/world.js"></script>
 <script src="js/wizard.js"></script>
+<script src="js/more.js"></script>
 </body>
 </html>

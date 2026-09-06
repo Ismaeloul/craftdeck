@@ -13,7 +13,8 @@ function classifyLine(line){
 function logRemote(line){
   const type = classifyLine(line);
   let time = null, text = line;
-  const m = text.match(/^\[(\d{2}:\d{2}:\d{2})\]\s*/);
+  // vanilla/Fabric: «[12:34:56] [Server thread/INFO]: …»; Paper: «[12:34:56 INFO]: …»
+  const m = text.match(/^\[(\d{2}:\d{2}:\d{2})(?: [A-Z]+)?\]:?\s*/);
   if(m){ time = m[1]; text = text.slice(m[0].length); }
   text = text.replace(/^\[[^\]]*\/(INFO|WARN|ERROR|FATAL|DEBUG)\]:?\s*/, '');
   logLine(type, esc(text), time);

@@ -1,4 +1,4 @@
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { readFile, readdir, stat, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { serverDir } from './store.js';
 import { listMods } from './mods.js';
@@ -138,6 +138,15 @@ export async function latestCrash(id: string, sinceMs: number): Promise<CrashInf
   } catch {
     return null;
   }
+}
+
+/** Los crash reports se acumulan para siempre; se conservan los últimos `keep`. Devuelve cuántos borró. */
+export async function pruneCrashReports(id: string, keep = 20): Promise<number> {
+  let files: string[] = [];
+  try { files = (await readdir(crashDir(id))).filter((f) => FILE_RE.test(f)); } catch { return 0; }
+  const old = files.sort().reverse().slice(keep); // el nombre lleva la fecha: orden lexicográfico = cronológico
+  for (const f of old) await rm(path.join(crashDir(id), f), { force: true });
+  return old.length;
 }
 
 export async function crashText(id: string, file: string): Promise<string> {

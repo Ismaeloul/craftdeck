@@ -1,16 +1,24 @@
 import express from 'express';
 import { createServer } from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
-import { rm } from 'node:fs/promises';
+import { rm, mkdir } from 'node:fs/promises';
+import { createWriteStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
+import { Transform } from 'node:stream';
 import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
-import { FRONTEND_DIR, BACKUPS_DIR, APP_VERSION } from './paths.js';
+import { FRONTEND_DIR, BACKUPS_DIR, CACHE_DIR, APP_VERSION } from './paths.js';
 import { listVanillaVersions } from './catalog/vanilla.js';
 import { listFabricGameVersions } from './catalog/fabric.js';
 import { listForgeVersions } from './catalog/forge.js';
 import { listNeoForgeVersions } from './catalog/neoforge.js';
+import { listPaperVersions } from './catalog/paper.js';
 import { provisionServer } from './provision.js';
+import { listModpackVersions, inspectModpack, applyModpack, writeMrpack } from './modpacks.js';
+import { isBlueMapInstalled, installBlueMap, blueMapReachable, proxyBlueMap, mapPortFor } from './bluemap.js';
+import { playerHistory } from './players-history.js';
+import { cmpVersion } from './util.js';
 import {
   setBroadcast, runtimeOf, consoleForPanel, startServer, stopServer, sendCommand, stopAll, announceInGame, assertNotBusy,
   autoStartServers, runningMemoryMb,
@@ -19,12 +27,12 @@ import { systemMemory } from './system.js';
 import { playerLists, playerAction, whitelistAdd, whitelistRemove } from './players.js';
 import {
   listBackups, makeBackup, restoreBackup, deleteBackup, backupFilePath,
-  scheduleAutoBackups, setBackupBroadcast, pruneAuto,
+  scheduleAutoBackups, setBackupBroadcast, pruneAuto, adoptUploadedBackup, importWorldZip, backupSchedule,
 } from './backups.js';
 import {
   readProperties, writeProperties, listEditableFiles, readEditableFile, writeEditableFile,
 } from './properties.js';
-import { listMods, installMod, removeMod, toggleMod, checkModUpdates, updateMod, enabledModJarPaths } from './mods.js';
+import { listMods, installMod, removeMod, toggleMod, checkModUpdates, updateMod, enabledModJarPaths, migrateMods, addUploadedJar } from './mods.js';
 import { createZip } from './backups.js';
 import { playerStats } from './stats.js';
 import { listCrashes, crashText } from './crashes.js';
@@ -35,11 +43,44 @@ import { testWebhook } from './discord.js';
 import { playitStatus, startPlayit, stopPlayit, setPlayitBroadcast, setPlayitAutoStart, initPlayit } from './playit.js';
 import {
   Loader, ServerMeta, listServers, getServer, addServer, removeServer, updateServer,
-  serverDir, nextFreePort, audit, readAudit,
+  serverDir, nextFreePort, audit, readAudit, supportsContent,
 } from './store.js';
 
 const PORT = Number(process.env.PORT ?? 8449);
-const LOADERS: Loader[] = ['vanilla', 'fabric', 'forge', 'neoforge'];
+const LOADERS: Loader[] = ['vanilla', 'paper', 'fabric', 'forge', 'neoforge'];
+
+/** Versiones de MC disponibles para un loader (para validar creaciones y cambios de versión). */
+async function catalogVersions(loader: Loader): Promise<string[]> {
+  switch (loader) {
+    case 'vanilla': return (await listVanillaVersions()).map((v) => v.id);
+    case 'paper': return (await listPaperVersions()).map((v) => v.id);
+    case 'fabric': return listFabricGameVersions();
+    case 'forge': return (await listForgeVersions()).map((v) => v.mc);
+    case 'neoforge': return (await listNeoForgeVersions()).map((v) => v.mc);
+  }
+}
+
+/** Recibe un archivo subido como cuerpo crudo (streaming a un temporal); devuelve la ruta. */
+async function receiveUpload(req: express.Request, maxBytes: number): Promise<string> {
+  await mkdir(CACHE_DIR, { recursive: true });
+  const tmp = path.join(CACHE_DIR, `upload-${crypto.randomUUID()}`);
+  let bytes = 0;
+  const limiter = new Transform({
+    transform(chunk: Buffer, _enc, cb) {
+      bytes += chunk.length;
+      if (bytes > maxBytes) cb(new Error(`Archivo demasiado grande (máximo ${Math.round(maxBytes / 1048576)} MB)`));
+      else cb(null, chunk);
+    },
+  });
+  try {
+    await pipeline(req, limiter, createWriteStream(tmp));
+  } catch (err) {
+    await rm(tmp, { force: true });
+    throw err;
+  }
+  if (!bytes) { await rm(tmp, { force: true }); throw new Error('No llegó ningún archivo'); }
+  return tmp;
+}
 
 const app = express();
 // el editor de archivos admite hasta 512 KB; el límite por defecto (100 KB) devolvía 413 al guardar
@@ -80,22 +121,14 @@ app.get('/api/system', asyncRoute(async (req, res) => {
 // ---- catálogo de versiones ----
 app.get('/api/catalog/:loader', asyncRoute(async (req, res) => {
   const loader = req.params.loader as Loader;
-  switch (loader) {
-    case 'vanilla':
-      res.json({ loader, versions: (await listVanillaVersions()).map((v) => v.id) });
-      return;
-    case 'fabric':
-      res.json({ loader, versions: await listFabricGameVersions() });
-      return;
-    case 'forge':
-      res.json({ loader, versions: (await listForgeVersions()).map((v) => v.mc) });
-      return;
-    case 'neoforge':
-      res.json({ loader, versions: (await listNeoForgeVersions()).map((v) => v.mc) });
-      return;
-    default:
-      res.status(400).json({ error: `Loader desconocido: ${String(loader)}` });
-  }
+  if (!LOADERS.includes(loader)) { res.status(400).json({ error: `Loader desconocido: ${String(loader)}` }); return; }
+  res.json({ loader, versions: await catalogVersions(loader) });
+}));
+
+// ---- modpacks de Modrinth: versiones publicadas de un pack (el asistente elige una) ----
+app.get('/api/modpacks/:project/versions', asyncRoute(async (req, res) => {
+  if (!/^[\w-]+$/.test(req.params.project!)) { res.status(400).json({ error: 'Proyecto inválido' }); return; }
+  res.json({ versions: await listModpackVersions(req.params.project!) });
 }));
 
 // ---- servidores ----
@@ -166,13 +199,22 @@ app.post('/api/servers/:id/players/:name/:action', asyncRoute(async (req, res) =
 }));
 
 app.post('/api/servers', asyncRoute(async (req, res) => {
-  const { name, loader, version, memoryMb, acceptEula } = req.body as {
-    name?: string; loader?: Loader; version?: string; memoryMb?: number; acceptEula?: boolean;
+  const { name, memoryMb, acceptEula, modpackVersionId } = req.body as {
+    name?: string; loader?: Loader; version?: string; memoryMb?: number; acceptEula?: boolean; modpackVersionId?: string;
   };
+  let { loader, version } = req.body as { loader?: Loader; version?: string };
   if (!name?.trim()) { res.status(400).json({ error: 'Falta el nombre del servidor' }); return; }
+  if (!acceptEula) { res.status(400).json({ error: 'Debes aceptar la EULA de Mojang' }); return; }
+
+  // desde un modpack: el loader y la versión los dicta el propio pack
+  let pinnedLoaderVersion: string | undefined;
+  if (modpackVersionId) {
+    if (!/^[\w-]+$/.test(modpackVersionId)) { res.status(400).json({ error: 'Versión de modpack inválida' }); return; }
+    const info = await inspectModpack(modpackVersionId);
+    loader = info.loader; version = info.game; pinnedLoaderVersion = info.loaderVersion || undefined;
+  }
   if (!loader || !LOADERS.includes(loader)) { res.status(400).json({ error: 'Loader inválido' }); return; }
   if (!version) { res.status(400).json({ error: 'Falta la versión de Minecraft' }); return; }
-  if (!acceptEula) { res.status(400).json({ error: 'Debes aceptar la EULA de Mojang' }); return; }
 
   const meta: ServerMeta = {
     id: crypto.randomUUID().slice(0, 8),
@@ -184,10 +226,135 @@ app.post('/api/servers', asyncRoute(async (req, res) => {
     memoryMb: Math.min(Math.max(memoryMb ?? 2048, 1024), 16384),
     createdAt: new Date().toISOString(),
     provision: { status: 'creating', log: [] },
+    ...(pinnedLoaderVersion ? { pinnedLoaderVersion } : {}),
   };
   await addServer(meta);
-  void provisionServer(meta, broadcast); // continúa en segundo plano
+  // continúa en segundo plano: primero el contenido del modpack (si lo hay), luego Java + loader
+  void (async () => {
+    if (modpackVersionId) {
+      try {
+        await applyModpack(meta, modpackVersionId, async (msg) => {
+          meta.provision.log.push(msg);
+          await updateServer(meta.id, { provision: meta.provision }).catch(() => {});
+          broadcast('provision', { id: meta.id, status: 'creating', msg });
+        });
+      } catch (err) {
+        meta.provision.status = 'error';
+        meta.provision.error = `Modpack: ${err instanceof Error ? err.message : String(err)}`;
+        await updateServer(meta.id, { provision: meta.provision }).catch(() => {});
+        broadcast('provision', { id: meta.id, status: 'error', msg: meta.provision.error });
+        return;
+      }
+    }
+    await provisionServer(meta, broadcast);
+  })();
   res.status(201).json(meta);
+}));
+
+// ---- cambiar la versión de Minecraft (y opcionalmente vanilla ⇄ paper) conservando mundo y mods ----
+app.post('/api/servers/:id/version', asyncRoute(async (req, res) => {
+  const { version, loader: newLoader } = req.body as { version?: string; loader?: Loader };
+  const meta = await getServer(req.params.id!);
+  if (!meta) { res.status(404).json({ error: 'Servidor no encontrado' }); return; }
+  if (!version) { res.status(400).json({ error: 'Falta la versión' }); return; }
+  if (meta.provision.status !== 'ready') { res.status(400).json({ error: 'El servidor aún no está preparado' }); return; }
+  if (runtimeOf(meta.id).status !== 'offline') { res.status(400).json({ error: 'Detén el servidor antes de cambiar de versión' }); return; }
+  assertNotBusy(meta.id);
+  let loader = meta.loader;
+  if (newLoader && newLoader !== meta.loader) {
+    // solo vanilla ⇄ paper comparten formato de mundo sin más; entre loaders de mods no se cambia
+    const ok = ['vanilla', 'paper'].includes(meta.loader) && ['vanilla', 'paper'].includes(newLoader);
+    if (!ok) { res.status(400).json({ error: 'Solo se puede cambiar entre Vanilla y Paper; para otro loader crea un servidor nuevo' }); return; }
+    loader = newLoader;
+  }
+  if (!(await catalogVersions(loader)).includes(version)) { res.status(400).json({ error: `${loader} no tiene la versión ${version}` }); return; }
+  if (version === meta.mcVersion && loader === meta.loader) { res.status(400).json({ error: 'Ya está en esa versión' }); return; }
+  // los mundos no van hacia atrás: Minecraft se niega a abrir un mundo de una versión más nueva
+  if (cmpVersion(version, meta.mcVersion) < 0) { res.status(400).json({ error: `Bajar de ${meta.mcVersion} a ${version} rompería el mundo: Minecraft no abre mundos de versiones más nuevas. Solo se puede subir.` }); return; }
+
+  // red de seguridad: backup completo antes de tocar nada
+  const backup = await makeBackup(meta.id, false);
+  const from = `${meta.loader} ${meta.mcVersion}`;
+  meta.loader = loader;
+  meta.mcVersion = version;
+  meta.provision = { status: 'creating', log: [`Backup previo: ${backup.name}.zip`, `Cambiando de ${from} a ${loader} ${version}…`] };
+  await updateServer(meta.id, { loader, mcVersion: version, provision: meta.provision, pinnedLoaderVersion: undefined, modpack: undefined });
+  broadcast('servers', {});
+  await audit('refresh', `Cambió ${meta.name} de ${from} a ${loader} ${version}`, 'warn');
+  void (async () => {
+    await provisionServer(meta, broadcast);
+    const fresh = await getServer(meta.id);
+    if (fresh?.provision.status !== 'ready' || !supportsContent(loader)) return;
+    try {
+      const mig = await migrateMods(meta.id);
+      const bits = [];
+      if (mig.updated.length) bits.push(`${mig.updated.length} actualizados (${mig.updated.join(', ')})`);
+      if (mig.kept.length) bits.push(`${mig.kept.length} ya compatibles`);
+      if (mig.disabled.length) bits.push(`${mig.disabled.length} desactivados por no tener versión para ${version}: ${mig.disabled.join(', ')}`);
+      if (mig.manual.length) bits.push(`${mig.manual.length} subidos a mano que debes revisar tú: ${mig.manual.join(', ')}`);
+      const msg = `Mods tras el cambio: ${bits.join(' · ') || 'no había ninguno'}.`;
+      fresh.provision.log.push(msg);
+      await updateServer(meta.id, { provision: fresh.provision });
+      broadcast('provision', { id: meta.id, status: 'ready', msg });
+      broadcast('migration', { id: meta.id, ...mig });
+    } catch (err) {
+      broadcast('provision', { id: meta.id, status: 'ready', msg: `No pude revisar los mods: ${err instanceof Error ? err.message : err}` });
+    }
+  })();
+  res.json({ ok: true, backup: backup.name });
+}));
+
+// ---- subidas: mod/plugin .jar, mundo en zip, backup en zip (cuerpo crudo, ?name=archivo) ----
+app.post('/api/servers/:id/upload/:kind', asyncRoute(async (req, res) => {
+  const meta = await getServer(req.params.id!);
+  if (!meta) { res.status(404).json({ error: 'Servidor no encontrado' }); return; }
+  const kind = req.params.kind!;
+  const name = path.basename(String(req.query.name ?? '')).replace(/[^\w.\-+ '()\[\]]/g, '_');
+  if (kind === 'mod') {
+    if (!name.endsWith('.jar')) { res.status(400).json({ error: 'Solo se admiten archivos .jar' }); return; }
+    const tmp = await receiveUpload(req, 512 * 1024 * 1024);
+    await addUploadedJar(meta.id, name, tmp);
+    res.status(201).json({ ok: true, filename: name });
+  } else if (kind === 'world') {
+    if (!name.endsWith('.zip')) { res.status(400).json({ error: 'El mundo debe ir en un .zip' }); return; }
+    const tmp = await receiveUpload(req, 8 * 1024 * 1024 * 1024);
+    await importWorldZip(meta.id, tmp);
+    res.status(201).json({ ok: true });
+  } else if (kind === 'backup') {
+    if (!name.endsWith('.zip')) { res.status(400).json({ error: 'El backup debe ser un .zip' }); return; }
+    const tmp = await receiveUpload(req, 8 * 1024 * 1024 * 1024);
+    res.status(201).json(await adoptUploadedBackup(meta.id, tmp));
+  } else {
+    res.status(400).json({ error: 'Tipo de subida desconocido' });
+  }
+}));
+
+// ---- mapa en vivo (BlueMap) ----
+app.get('/api/servers/:id/map/status', asyncRoute(async (req, res) => {
+  const meta = await getServer(req.params.id!);
+  if (!meta) { res.status(404).json({ error: 'Servidor no encontrado' }); return; }
+  const installed = await isBlueMapInstalled(meta);
+  const online = runtimeOf(meta.id).status === 'online';
+  const port = mapPortFor(meta);
+  res.json({ supported: supportsContent(meta.loader), installed, online, port, reachable: installed && online ? await blueMapReachable(port) : false });
+}));
+app.post('/api/servers/:id/map/install', asyncRoute(async (req, res) => {
+  const meta = await getServer(req.params.id!);
+  if (!meta) { res.status(404).json({ error: 'Servidor no encontrado' }); return; }
+  const installed = await installBlueMap(meta);
+  await audit('map', `Instaló BlueMap en ${meta.name}`, 'ok');
+  res.status(201).json({ installed, needsRestart: runtimeOf(meta.id).status !== 'offline' });
+}));
+app.all('/api/servers/:id/map/view/*', asyncRoute(async (req, res) => {
+  const meta = await getServer(req.params.id!);
+  if (!meta) { res.status(404).json({ error: 'Servidor no encontrado' }); return; }
+  proxyBlueMap(mapPortFor(meta), req, res, req.params[0] ?? '');
+}));
+app.get('/api/servers/:id/map/view', (req, res) => { res.redirect(`/api/servers/${req.params.id}/map/view/`); });
+
+// ---- historial de conexiones ----
+app.get('/api/servers/:id/players/history', asyncRoute(async (req, res) => {
+  res.json(await playerHistory(req.params.id!, runtimeOf(req.params.id!).players));
 }));
 
 app.delete('/api/servers/:id', asyncRoute(async (req, res) => {
@@ -370,6 +537,17 @@ app.get('/api/servers/:id/mods/pack', asyncRoute(async (req, res) => {
   await audit('download', `Exportó el pack de mods (${files.length} jars)`, 'info');
 }));
 
+// pack de amigos en .mrpack: lo importan Prism, Modrinth App, ATLauncher…
+app.get('/api/servers/:id/mods/pack.mrpack', asyncRoute(async (req, res) => {
+  const meta = await getServer(req.params.id!);
+  if (!meta) { res.status(404).json({ error: 'Servidor no encontrado' }); return; }
+  if (!supportsContent(meta.loader) || meta.loader === 'paper') { res.status(400).json({ error: 'El .mrpack es para servidores con mods (los plugins de Paper no van en el cliente)' }); return; }
+  res.attachment(`craftdeck-${meta.name.replace(/[^\w-]+/g, '_')}.mrpack`);
+  res.on('error', () => res.destroy());
+  const n = await writeMrpack(meta, res);
+  await audit('download', `Exportó el pack de amigos en .mrpack (${n} mods)`, 'info');
+}));
+
 app.get('/api/servers/:id/mods/updates', asyncRoute(async (req, res) => {
   res.json({ updates: await checkModUpdates(req.params.id!) });
 }));
@@ -419,7 +597,8 @@ app.post('/api/servers/:id/backups', asyncRoute(async (req, res) => {
 }));
 
 app.post('/api/servers/:id/backups/:name/restore', asyncRoute(async (req, res) => {
-  await restoreBackup(req.params.id!, req.params.name!);
+  const { mode } = (req.body ?? {}) as { mode?: string };
+  await restoreBackup(req.params.id!, req.params.name!, mode === 'all' ? 'all' : 'world');
   res.json({ ok: true });
 }));
 
@@ -433,14 +612,22 @@ app.get('/api/servers/:id/backups/:name/download', asyncRoute(async (req, res) =
 }));
 
 app.put('/api/servers/:id/backup-settings', asyncRoute(async (req, res) => {
-  const { auto, keep } = req.body as { auto?: boolean; keep?: number };
+  const { auto, keep, time, days } = req.body as { auto?: boolean; keep?: number; time?: string; days?: number[] };
   const meta = await getServer(req.params.id!);
   if (!meta) { res.status(404).json({ error: 'Servidor no encontrado' }); return; }
   if (keep !== undefined && (!Number.isInteger(keep) || keep < 1 || keep > 30)) { res.status(400).json({ error: 'Conserva entre 1 y 30 copias' }); return; }
+  if (time !== undefined && !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) { res.status(400).json({ error: 'Hora inválida (HH:MM)' }); return; }
+  if (days !== undefined && (!Array.isArray(days) || days.some((d) => !Number.isInteger(d) || d < 0 || d > 6))) { res.status(400).json({ error: 'Días inválidos' }); return; }
   await updateServer(meta.id, {
     backupAuto: auto ?? meta.backupAuto,
     backupKeep: keep ?? meta.backupKeep,
+    backupTime: time ?? meta.backupTime,
+    backupDays: days !== undefined ? (days.length === 7 || days.length === 0 ? undefined : days) : meta.backupDays,
   });
+  if (time !== undefined || days !== undefined) {
+    const s = backupSchedule(await getServer(meta.id) ?? meta);
+    await audit('database', `Backup automático de ${meta.name}: a las ${s.time}${s.days.length === 7 ? ' todos los días' : ' los días ' + s.days.join(',')}`, 'info');
+  }
   // si se baja el número, las copias automáticas que sobran se borran ya, sin esperar a las 04:00
   const pruned = keep !== undefined ? await pruneAuto(meta.id, keep) : 0;
   if (keep !== undefined) await audit('database', `Backups automáticos de ${meta.name}: conservar los últimos ${keep}${pruned ? ` (borradas ${pruned} copias antiguas)` : ''}`, 'info');

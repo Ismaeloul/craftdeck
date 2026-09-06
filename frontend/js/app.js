@@ -85,11 +85,12 @@ function curServer(){ return state.servers.find(s=>s.id===state.currentServerId)
 /* =================== NAV =================== */
 const NAV = [
   { group:'SERVIDOR', items:[
+    { id:'servers', label:'Todos los servidores', ic:'server' },
     { id:'dashboard', label:'Dashboard', ic:'dashboard' },
     { id:'console', label:'Consola', ic:'terminal' },
     { id:'players', label:'Jugadores', ic:'users', badge:'navPlayerCount' },
     { id:'stats', label:'Estadísticas', ic:'barChart' },
-    { id:'map', label:'Mapa en vivo', ic:'map', soon:true },
+    { id:'map', label:'Mapa en vivo', ic:'map' },
   ]},
   { group:'CONTENIDO', items:[
     { id:'mods', label:'Mods', ic:'package', badge:'navModCount', badgeWarn:true },
@@ -133,8 +134,9 @@ function go(id){
   el.classList.remove('visible'); void el.offsetWidth;
   el.classList.add('visible');
   document.getElementById('pageTitle').textContent = titles[id];
-  if(id==='map') requestAnimationFrame(drawMapBase);
-  if(id==='world' && typeof loadWorld==='function'){ loadWorld(); loadResources(); }
+  if(id==='servers') renderServersOverview();
+  if(id==='map') loadMap();
+  if(id==='world' && typeof loadWorld==='function'){ loadWorld(); loadResources(); loadVersionCard(); }
   if(id==='files') loadFiles();
   if(id==='audit') loadAudit();
   if(id==='backups') loadBackups();
@@ -143,7 +145,7 @@ function go(id){
   if(id==='events') loadEvents();
   if(id==='integrations') loadIntegrations();
   if(id==='mods'){ renderModFilters(); loadInstalledMods(); if(state.modTab==='explore') searchModrinth(document.getElementById('modSearch').value.trim(), 0); }
-  if(id==='players' && typeof refreshPlayerLists==='function'){ refreshPlayerLists().then(()=>renderWhitelist()); loadPlayersExtras(); }
+  if(id==='players' && typeof refreshPlayerLists==='function'){ refreshPlayerLists().then(()=>{ renderWhitelist(); loadPlayerHistory(); }); loadPlayersExtras(); }
 }
 document.querySelectorAll('.nav-item').forEach(item=>{
   item.addEventListener('click', ()=>go(item.dataset.section));
@@ -373,7 +375,9 @@ function logLine(type,text,time){
   const tag = {info:'INFO',warn:'WARN',err:'ERROR',cmd:'CMD'}[type];
   const line = document.createElement('div');
   line.className = 'console-line';
+  line.dataset.type = type;
   line.innerHTML = `<span class="time">${time||ts()}</span> <span class="${cls}">${tag}</span> ${text}`;
+  if(typeof lineMatchesFilter==='function' && !lineMatchesFilter(line)) line.classList.add('hidden');
   consoleBody.appendChild(line);
   if(consoleBody.children.length>300) consoleBody.firstChild.remove();
   if(state.autoscroll) consoleBody.scrollTop = consoleBody.scrollHeight;
@@ -431,7 +435,7 @@ function renderPlayers(){
     const op = lists.ops.includes(p.name);
     return `
     <div class="player-row" style="animation-delay:${i*0.05}s">
-      <div class="avatar">${esc(p.name[0].toUpperCase())}</div>
+      <div class="avatar"><img src="https://mc-heads.net/avatar/${encodeURIComponent(p.name)}/38" alt="" loading="lazy" onerror="this.replaceWith(document.createTextNode('${esc(p.name[0].toUpperCase())}'))"></div>
       <div class="player-info">
         <div class="player-name">${esc(p.name)}
           ${op?'<span class="chip amber">OP</span>':''}
@@ -627,6 +631,13 @@ async function loadInstalledMods(){
   renderInstalledMods();
   const chip = document.getElementById('modLoaderChip');
   if(chip) chip.textContent = `${(curLoader()||'').toUpperCase()} ${curGame()||''}`;
+  // Paper corre plugins, no mods: cambia el vocabulario y esconde los packs para clientes
+  const word = contentWord(curLoader());
+  document.getElementById('modsTitle').textContent = word;
+  titles.mods = word; if(document.querySelector('.nav-item.active')?.dataset.section==='mods') document.getElementById('pageTitle').textContent = word;
+  document.getElementById('modSearch').placeholder = curLoader()==='paper' ? 'Buscar plugins en Modrinth… prueba: essentials, luckperms, worldedit' : 'Buscar en Modrinth… prueba: create, voice chat, waystones';
+  document.getElementById('btnPackZip').style.display = curLoader()==='paper' ? 'none' : '';
+  document.getElementById('btnPackMrpack').style.display = curLoader()==='paper' ? 'none' : '';
 }
 /* paginación de instalados: con packs de 80 mods la lista era un scroll infinito */
 const INSTALLED_PER_PAGE = 15;
@@ -657,7 +668,7 @@ function renderInstalledMods(){
   installedTabBadge();
   pager.innerHTML = '';
   if(curLoader()==='vanilla'){
-    el.innerHTML = '<div class="empty">Este servidor es vanilla y no admite mods. Crea un servidor Fabric, Forge o NeoForge para usarlos.</div>';
+    el.innerHTML = '<div class="empty">Este servidor es vanilla puro y no admite mods ni plugins. En Mundo → Versión de Minecraft puedes pasarlo a Paper (plugins) sin perder el mundo, o crea uno Fabric, Forge o NeoForge para mods.</div>';
     return;
   }
   const all = state.installedMods || [];
@@ -776,7 +787,10 @@ async function searchModrinth(query, page=0){
   grid.innerHTML = '<div class="searching"><span class="spin"></span> Buscando en Modrinth…</div>';
   state.modPage = page;
 
-  const facets = [["project_type:mod"], [`categories:${loader}`], [`versions:${game}`]];
+  // Paper: plugins (Modrinth los etiqueta paper/spigot/bukkit); resto: mods del loader
+  const facets = loader==='paper'
+    ? [["project_type:plugin"], ["categories:paper","categories:spigot","categories:bukkit"], [`versions:${game}`]]
+    : [["project_type:mod"], [`categories:${loader}`], [`versions:${game}`]];
   if(state.modCats.size) facets.push([...state.modCats].map(c=>`categories:${c}`));
   if(state.modServerOnly) facets.push(["server_side:required","server_side:optional"]);
   if(!state.modShowLibs) facets.push(["categories!=library"]);
@@ -865,7 +879,8 @@ async function checkUpdates(){
 }
 /* ---- descarga real de .jar desde el CDN de Modrinth ---- */
 async function fetchJarFile(slug){
-  const params = `loaders=${encodeURIComponent(JSON.stringify([curLoader()]))}&game_versions=${encodeURIComponent(JSON.stringify([curGame()]))}`;
+  const loaders = curLoader()==='paper' ? ['paper','spigot','bukkit'] : [curLoader()];
+  const params = `loaders=${encodeURIComponent(JSON.stringify(loaders))}&game_versions=${encodeURIComponent(JSON.stringify([curGame()]))}`;
   const res = await fetch(`${MODRINTH_API}/project/${slug}/version?${params}`);
   if(!res.ok) throw new Error('HTTP '+res.status);
   const versions = await res.json();
@@ -1017,7 +1032,7 @@ function backupTaskRow(){
       <div class="row-icon" style="background:var(--info-dim);color:var(--info)">${icon('database',16)}</div>
       <div class="row-body">
         <div class="row-title">Backup automático ${on?'':'<span class="chip gray">PAUSADO</span>'}</div>
-        <div class="row-sub">Diario · 04:00 · conserva los últimos ${meta.backupKeep ?? 7} · integrado</div>
+        <div class="row-sub">${backupWhen(meta)} · conserva los últimos ${meta.backupKeep ?? 7} · integrado</div>
       </div>
       <label class="switch"><input type="checkbox" ${on?'checked':''} onchange="toggleBackupFromEvents(this.checked)"><span class="track"></span><span class="thumb"></span></label>
       <span style="width:30px"></span>
@@ -1070,7 +1085,7 @@ function renderDashTasks(){
     .sort((a,b)=>new Date(a.next)-new Date(b.next))
     .map(e=>({ m: EV_META[e.type]||EV_META.command, name: evTaskName(e), when: fmtNext(e.next) }));
   if(meta && meta.backupAuto !== false)
-    items.push({ m:{ic:'database',color:'var(--info)'}, name:'Backup automático', when:'diario · 04:00' });
+    items.push({ m:{ic:'database',color:'var(--info)'}, name:'Backup automático', when: backupWhen(meta) });
   document.getElementById('dashTasks').innerHTML = items.slice(0,4).map(t=>`
     <div style="display:flex;align-items:center;gap:11px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:12.5px;">
       <span style="color:${t.m.color};display:flex">${icon(t.m.ic,14)}</span>
@@ -1195,6 +1210,7 @@ function renderPlayit(st){
       </div>
       <p style="font-size:11.5px;color:var(--muted);margin-top:8px;line-height:1.5;">Abre el enlace, inicia sesión en playit.gg y crea un túnel <b>Minecraft Java</b> hacia el puerto de tu server. La dirección que te den es la que compartes con tus amigos.</p>`;
   } else claim.style.display = 'none';
+  renderTunnels(st);
   const log = document.getElementById('ptLog');
   if(st.lastLines?.length){
     log.style.display = '';
@@ -1240,6 +1256,7 @@ async function loadBackups(){
   const meta = curServer()?.meta;
   document.getElementById('bkAuto').checked = meta ? meta.backupAuto !== false : true;
   renderBackupKeep();
+  renderBackupSchedule();
   const total = state.backups.reduce((a,b)=>a+b.size,0);
   document.getElementById('backupsSubtitle').textContent =
     state.backups.length ? `Snapshots del servidor · ${fmtSize(total)} usados` : 'Snapshots del servidor · todavía no hay ninguno';
@@ -1252,8 +1269,9 @@ function renderBackups(){
         <div class="row-title" style="font-family:var(--mono);font-size:12.5px">${b.name}.zip</div>
         <div class="row-sub">${fmtDate(b.createdAt)} · ${fmtSize(b.size)} · ${b.auto?'automático':'manual'}</div>
       </div>
-      <a class="btn small ghost" href="/api/servers/${curServerId()}/backups/${b.name}/download" title="Descargar">${icon('download',13)}</a>
-      <button class="btn small" onclick="armAction(this, ()=>restoreBackupUI('${b.name}'))">Restaurar</button>
+      <a class="btn small ghost" href="/api/servers/${curServerId()}/backups/${b.name}/download" title="Descargar el .zip a tu ordenador">${icon('download',13)}</a>
+      <button class="btn small" onclick="armAction(this, ()=>restoreBackupUI('${b.name}','world'))" title="Devuelve solo el mundo; mods, whitelist y configuración se quedan como están">Restaurar mundo</button>
+      <button class="btn small ghost" onclick="armAction(this, ()=>restoreBackupUI('${b.name}','all'))" title="Devuelve también server.properties, whitelist, ops y mods/plugins tal como estaban ese día">Todo</button>
       <button class="icon-btn red" style="width:auto;padding:0 8px" onclick="armAction(this, ()=>deleteBackupUI('${b.name}'))">${icon('trash',13)}</button>
     </div>`).join('') || '<div class="empty">Sin backups todavía. Crea el primero con el botón de arriba.</div>';
 }
@@ -1276,10 +1294,10 @@ async function makeBackup(){
   } catch(err){ toast('alert', err.message, 'err'); }
   btn.disabled = false; btn.innerHTML = icon('database',14)+' Crear backup';
 }
-async function restoreBackupUI(name){
+async function restoreBackupUI(name, mode='world'){
   try {
-    await API.post(`/servers/${curServerId()}/backups/${name}/restore`);
-    toast('refresh',`Mundo restaurado desde ${name}`,'warn');
+    await API.post(`/servers/${curServerId()}/backups/${name}/restore`, { mode });
+    toast('refresh', mode==='all' ? `Servidor completo restaurado desde ${name}` : `Mundo restaurado desde ${name}`, 'warn');
   } catch(err){ toast('alert', err.message, 'err'); }
 }
 async function deleteBackupUI(name){
@@ -1414,75 +1432,7 @@ function tickCharts(){
 }
 setInterval(tickCharts,1500);
 
-/* =================== MAP (placeholder decorativo hasta integrar BlueMap) =================== */
-let mapBase = null;
-function terrainH(x,y){
-  return Math.sin(x*0.09)*Math.cos(y*0.075)*1.1
-       + Math.sin(x*0.031+y*0.045)*0.9
-       + Math.cos(x*0.017-y*0.023)*0.7
-       + Math.sin((x+y)*0.11)*0.35;
-}
-function terrainColor(v){
-  if(v<-0.9) return '#1d4ed8';
-  if(v<-0.35) return '#2563eb';
-  if(v<-0.15) return '#d4c27a';
-  if(v<0.5) return '#4d7c3a';
-  if(v<1.1) return '#2d5426';
-  if(v<1.7) return '#6b7280';
-  return '#e5e7eb';
-}
-function drawMapBase(){
-  const canvas = document.getElementById('mapCanvas');
-  const dpr = window.devicePixelRatio||1;
-  const w = canvas.clientWidth, h = canvas.clientHeight;
-  if(!w) return;
-  canvas.width=w*dpr; canvas.height=h*dpr;
-  const off = document.createElement('canvas');
-  const cell = 7;
-  const cols = Math.ceil(w/cell), rows = Math.ceil(h/cell);
-  off.width=cols; off.height=rows;
-  const octx = off.getContext('2d');
-  for(let cy=0;cy<rows;cy++) for(let cx=0;cx<cols;cx++){
-    octx.fillStyle = terrainColor(terrainH(cx,cy));
-    octx.fillRect(cx,cy,1,1);
-  }
-  mapBase = { off, w, h, dpr };
-  drawMapFrame();
-}
-function drawMapFrame(){
-  if(!mapBase) return;
-  const canvas = document.getElementById('mapCanvas');
-  const { off, w, h, dpr } = mapBase;
-  const ctx = canvas.getContext('2d');
-  ctx.setTransform(dpr,0,0,dpr,0,0);
-  ctx.imageSmoothingEnabled = false;
-  ctx.clearRect(0,0,w,h);
-  ctx.drawImage(off,0,0,w,h);
-  // subtle grid
-  ctx.strokeStyle='rgba(0,0,0,.12)'; ctx.lineWidth=1;
-  for(let x=0;x<w;x+=56){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke(); }
-  for(let y=0;y<h;y+=56){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
-  // spawn marker
-  const sx=w*0.5, sy=h*0.5;
-  ctx.strokeStyle='rgba(255,255,255,.85)'; ctx.lineWidth=1.6;
-  ctx.strokeRect(sx-6,sy-6,12,12);
-  ctx.font='10px Inter, Segoe UI'; ctx.fillStyle='rgba(255,255,255,.75)';
-  ctx.fillText('spawn', sx+10, sy+3);
-  // marca de agua honesta: esto todavía no es tu mundo real
-  ctx.font='700 26px Inter, Segoe UI';
-  const label = 'PRÓXIMAMENTE · terreno de ejemplo';
-  const lw = ctx.measureText(label).width;
-  ctx.fillStyle='rgba(9,9,11,.65)';
-  ctx.fillRect(w/2-lw/2-18, h/2-58, lw+36, 42);
-  ctx.fillStyle='rgba(255,255,255,.85)';
-  ctx.fillText(label, w/2-lw/2, h/2-30);
-}
-document.getElementById('mapCanvas').addEventListener('mousemove', e=>{
-  const r = e.target.getBoundingClientRect();
-  const bx = Math.round((e.clientX-r.left-r.width/2)*4), bz = Math.round((e.clientY-r.top-r.height/2)*4);
-  document.getElementById('mapCoords').textContent = `${bx}, ${bz}`;
-});
-window.addEventListener('resize', ()=>{ if(document.getElementById('sec-map').classList.contains('visible')) drawMapBase(); tickCharts(); });
+window.addEventListener('resize', ()=>tickCharts());
 
 /* =================== UPTIME =================== */
 setInterval(()=>{
@@ -1509,3 +1459,10 @@ renderPlayers();
 modUpdatesBadge();
 tickCharts();
 setTimeout(()=>toast('umbrella','Bienvenido a CraftDeck','ok'),700);
+
+/* «Diario · 04:00» o «Lun, Mié · 22:00» según el horario del backup automático */
+function backupWhen(meta){
+  const t = meta?.backupTime || '04:00';
+  const d = meta?.backupDays?.length ? meta.backupDays : null;
+  return `${d ? d.map(x=>DAY_NAMES[x]).join(', ') : 'Diario'} · ${t}`;
+}

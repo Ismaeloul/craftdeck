@@ -17,10 +17,21 @@ interface PlayitState {
   claimUrl: string | null;
   lastLines: string[];
   autoStart: boolean; // arrancar el agente solo cuando arranca CraftDeck
+  tunnels: string[];  // direcciones públicas «host:puerto» que el agente ha mencionado en su log
 }
 
 let proc: ChildProcess | null = null;
-const state: PlayitState = { running: false, claimUrl: null, lastLines: [], autoStart: false };
+const state: PlayitState = { running: false, claimUrl: null, lastLines: [], autoStart: false, tunnels: [] };
+
+// el agente imprime las direcciones de los túneles (xxx.playit.gg:12345, xxx.joinmc.link…)
+const TUNNEL_RE = /\b([a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:playit\.gg|joinmc\.link|ply\.gg|craft\.ply\.gg))(?::(\d{2,5}))?\b/gi;
+function noteTunnels(line: string): void {
+  for (const m of line.matchAll(TUNNEL_RE)) {
+    if (m[1]!.startsWith('api.') || m[1]!.startsWith('playit.gg')) continue;
+    const addr = m[2] ? `${m[1]}:${m[2]}` : m[1]!;
+    if (!state.tunnels.includes(addr)) { state.tunnels.push(addr); broadcastFn('playit', { running: true, tunnels: state.tunnels }); }
+  }
+}
 
 async function loadSettings(): Promise<void> {
   try {
@@ -84,6 +95,7 @@ export async function startPlayit(): Promise<void> {
   const bin = await ensureBinary();
   state.claimUrl = null;
   state.lastLines = [];
+  state.tunnels = [];
   proc = spawn(bin, ['--secret_path', path.join(PLAYIT_DIR, 'playit.toml')], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -94,6 +106,7 @@ export async function startPlayit(): Promise<void> {
       if (!line.trim()) continue;
       state.lastLines.push(line);
       if (state.lastLines.length > 60) state.lastLines.shift();
+      noteTunnels(line);
       const claim = line.match(/https:\/\/playit\.gg\/claim\/[\w-]+/);
       if (claim && state.claimUrl !== claim[0]) {
         state.claimUrl = claim[0];
