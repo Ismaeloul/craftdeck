@@ -248,11 +248,12 @@
         <div class="search-bar">
           <div class="search-wrap">
             <i data-icon="search" data-size="15"></i>
-            <input type="text" id="installedSearch" placeholder="Filtrar tus mods instalados…" oninput="renderInstalledMods()">
+            <input type="text" id="installedSearch" placeholder="Filtrar tus mods instalados…" oninput="state.installedPage=0; renderInstalledMods()">
           </div>
           <button class="btn primary" id="btnUpdateAll" style="display:none" onclick="updateAllMods()"><i data-icon="refresh" data-size="13"></i> Actualizar todo</button>
         </div>
         <div class="card" id="installedMods" style="padding:10px;"></div>
+        <div id="installedPager" style="display:flex;gap:6px;align-items:center;justify-content:center;margin-top:14px;flex-wrap:wrap;"></div>
       </div>
     </section>
 

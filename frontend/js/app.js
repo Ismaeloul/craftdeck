@@ -628,10 +628,34 @@ async function loadInstalledMods(){
   const chip = document.getElementById('modLoaderChip');
   if(chip) chip.textContent = `${(curLoader()||'').toUpperCase()} ${curGame()||''}`;
 }
+/* paginación de instalados: con packs de 80 mods la lista era un scroll infinito */
+const INSTALLED_PER_PAGE = 15;
+state.installedPage = 0;
+function goInstalledPage(p){
+  state.installedPage = p;
+  renderInstalledMods();
+  document.getElementById('modtab-installed').scrollIntoView({ behavior:'smooth', block:'start' });
+}
+function renderInstalledPager(total){
+  const el = document.getElementById('installedPager');
+  const pages = Math.ceil(total / INSTALLED_PER_PAGE);
+  if(pages <= 1){ el.innerHTML = ''; return; }
+  const p = state.installedPage;
+  const btn = (label, page, disabled=false, active=false) =>
+    `<button class="btn small${active?' primary':''}" ${disabled?'disabled':''} onclick="goInstalledPage(${page})">${label}</button>`;
+  const nums = [];
+  const from = Math.max(0, Math.min(p-2, pages-5));
+  for(let i=from; i<Math.min(from+5, pages); i++) nums.push(btn(i+1, i, false, i===p));
+  el.innerHTML =
+    btn('«', 0, p===0) + btn('‹', p-1, p===0) + nums.join('') + btn('›', p+1, p>=pages-1) + btn('»', pages-1, p>=pages-1) +
+    `<span style="font-size:12px;color:var(--muted);margin-left:10px">${total} mods · página ${p+1} de ${pages}</span>`;
+}
 function renderInstalledMods(){
   const el = document.getElementById('installedMods');
+  const pager = document.getElementById('installedPager');
   const upd = state.modUpdates || {};
   installedTabBadge();
+  pager.innerHTML = '';
   if(curLoader()==='vanilla'){
     el.innerHTML = '<div class="empty">Este servidor es vanilla y no admite mods. Crea un servidor Fabric, Forge o NeoForge para usarlos.</div>';
     return;
@@ -641,7 +665,13 @@ function renderInstalledMods(){
   const mods = q ? all.filter(m => (m.name+' '+m.filename).toLowerCase().includes(q)) : all;
   if(!all.length){ el.innerHTML = '<div class="empty" style="padding:16px">Sin mods instalados. Ve a la pestaña «Explorar», busca e instala: las dependencias se resuelven solas.</div>'; return; }
   if(!mods.length){ el.innerHTML = `<div class="empty" style="padding:16px">Ningún mod coincide con «${esc(q)}»</div>`; return; }
-  el.innerHTML = `<div class="mini-label" style="padding:4px 8px 8px">${q?`${mods.length} DE ${all.length}`:`INSTALADOS (${all.length})`} · los cambios se cargan al reiniciar</div>` + mods.map(m=>`
+  const pages = Math.ceil(mods.length / INSTALLED_PER_PAGE);
+  if(state.installedPage >= pages) state.installedPage = pages - 1; // tras borrar mods puede sobrar la página
+  const from = state.installedPage * INSTALLED_PER_PAGE;
+  const page = mods.slice(from, from + INSTALLED_PER_PAGE);
+  const range = pages > 1 ? ` · ${from+1}–${from+page.length}` : '';
+  renderInstalledPager(mods.length);
+  el.innerHTML = `<div class="mini-label" style="padding:4px 8px 8px">${q?`${mods.length} DE ${all.length}`:`INSTALADOS (${all.length})`}${range} · los cambios se cargan al reiniciar</div>` + page.map(m=>`
     <div class="player-row">
       <div class="avatar" style="color:var(--info)">${icon('package',16)}</div>
       <div class="player-info">
