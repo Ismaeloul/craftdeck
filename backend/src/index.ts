@@ -32,7 +32,7 @@ import {
 import {
   readProperties, writeProperties, listEditableFiles, readEditableFile, writeEditableFile,
 } from './properties.js';
-import { listMods, installMod, removeMod, toggleMod, checkModUpdates, updateMod, migrateMods, addUploadedJar, clientPack, contentDir } from './mods.js';
+import { listMods, installMod, removeMod, toggleMod, checkModUpdates, updateMod, migrateMods, addUploadedJar, clientPack, contentDir, ensureSideInfo } from './mods.js';
 import { createZip } from './backups.js';
 import { playerStats } from './stats.js';
 import { listCrashes, crashText } from './crashes.js';
@@ -502,6 +502,8 @@ app.post('/api/servers/:id/gamerule', asyncRoute(async (req, res) => {
 
 // ---- mods (Modrinth) ----
 app.get('/api/servers/:id/mods', asyncRoute(async (req, res) => {
+  // completa iconos y lado cliente/servidor de los mods antiguos (una consulta, solo si falta algo)
+  await ensureSideInfo(req.params.id!).catch(() => {});
   res.json({ installed: await listMods(req.params.id!) });
 }));
 

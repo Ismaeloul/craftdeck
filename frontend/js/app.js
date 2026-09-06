@@ -684,7 +684,7 @@ function renderInstalledMods(){
   renderInstalledPager(mods.length);
   el.innerHTML = `<div class="mini-label" style="padding:4px 8px 8px">${q?`${mods.length} DE ${all.length}`:`INSTALADOS (${all.length})`}${range} · los cambios se cargan al reiniciar</div>` + page.map(m=>`
     <div class="player-row">
-      <div class="avatar" style="color:var(--info)">${icon('package',16)}</div>
+      <div class="avatar" style="color:var(--info)">${m.iconUrl?`<img src="${esc(m.iconUrl)}" alt="" loading="lazy" onerror="this.remove()">`:icon('package',16)}</div>
       <div class="player-info">
         <div class="player-name">${esc(m.name)}
           ${!m.enabled?'<span class="chip gray">DESACTIVADO</span>':''}

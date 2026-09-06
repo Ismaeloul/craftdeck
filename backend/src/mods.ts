@@ -34,6 +34,7 @@ export interface TrackedMod {
   sha512?: string;
   // ¿lo necesita el cliente de los amigos? (Modrinth: required | optional | unsupported)
   clientSide?: Side;
+  iconUrl?: string; // icono del proyecto en Modrinth ("" = no tiene)
   serverSide?: Side;
 }
 export type Side = 'required' | 'optional' | 'unsupported' | 'unknown';
@@ -96,13 +97,13 @@ async function bestVersion(project: string, loaders: string[], game: string): Pr
   return v;
 }
 
-interface ProjectInfo { title: string; slug: string; client_side?: Side; server_side?: Side }
+interface ProjectInfo { title: string; slug: string; client_side?: Side; server_side?: Side; icon_url?: string | null }
 function trackedFromVersion(ver: ModrinthVersion, file: ModrinthFile, proj: ProjectInfo): TrackedMod {
   return {
     filename: file.filename, projectId: ver.project_id, slug: proj.slug,
     name: proj.title, versionId: ver.id, versionNumber: ver.version_number,
     url: file.url, size: file.size, sha1: file.hashes?.sha1, sha512: file.hashes?.sha512,
-    clientSide: proj.client_side ?? 'unknown', serverSide: proj.server_side ?? 'unknown',
+    clientSide: proj.client_side ?? 'unknown', serverSide: proj.server_side ?? 'unknown', iconUrl: proj.icon_url ?? '',
   };
 }
 
@@ -112,14 +113,14 @@ function trackedFromVersion(ver: ModrinthVersion, file: ModrinthFile, proj: Proj
  */
 export async function ensureSideInfo(id: string): Promise<TrackedMod[]> {
   const tracked = await readTracked(id);
-  const missing = tracked.filter((m) => !m.clientSide || m.clientSide === 'unknown').filter((m) => m.projectId);
+  const missing = tracked.filter((m) => !m.clientSide || m.clientSide === 'unknown' || m.iconUrl === undefined).filter((m) => m.projectId);
   if (missing.length) {
     try {
       const ids = [...new Set(missing.map((m) => m.projectId))];
       const projects = await fetchJson<(ProjectInfo & { id: string })[]>(`${MODRINTH}/projects?ids=${encodeURIComponent(JSON.stringify(ids))}`);
       for (const m of missing) {
         const p = projects.find((x) => x.id === m.projectId);
-        if (p) { m.clientSide = p.client_side ?? 'unknown'; m.serverSide = p.server_side ?? 'unknown'; if (!m.slug) m.slug = p.slug; }
+        if (p) { m.clientSide = p.client_side ?? 'unknown'; m.serverSide = p.server_side ?? 'unknown'; m.iconUrl = p.icon_url ?? ''; if (!m.slug) m.slug = p.slug; }
       }
       await writeTracked(id, tracked);
     } catch { /* sin red: se exporta con lo que hay */ }

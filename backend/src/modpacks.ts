@@ -132,10 +132,10 @@ async function trackFromDownload(filename: string, url: string, size: number, ha
   if (!m) return base;
   try {
     const [proj, ver] = await Promise.all([
-      fetchJson<{ title: string; slug: string }>(`${MODRINTH}/project/${m[1]}`),
+      fetchJson<{ title: string; slug: string; icon_url?: string | null; client_side?: string; server_side?: string }>(`${MODRINTH}/project/${m[1]}`),
       fetchJson<{ version_number: string }>(`${MODRINTH}/version/${m[2]}`),
     ]);
-    return { ...base, name: proj.title, slug: proj.slug, versionNumber: ver.version_number };
+    return { ...base, name: proj.title, slug: proj.slug, versionNumber: ver.version_number, iconUrl: proj.icon_url ?? '', clientSide: (proj.client_side as TrackedMod['clientSide']) ?? 'unknown', serverSide: (proj.server_side as TrackedMod['serverSide']) ?? 'unknown' };
   } catch {
     return base;
   }
