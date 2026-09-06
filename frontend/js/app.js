@@ -690,6 +690,8 @@ function renderInstalledMods(){
           ${!m.enabled?'<span class="chip gray">DESACTIVADO</span>':''}
           ${upd[m.filename]?`<span class="chip amber">HAY ${esc(upd[m.filename])}</span>`:''}
           ${m.tracked?'':'<span class="chip gray">MANUAL</span>'}
+          ${m.clientSide==='unsupported'?'<span class="chip violet" title="Tus amigos no necesitan instalarlo: se queda fuera del pack">SOLO SERVER</span>':''}
+          ${m.clientSide==='optional'?'<span class="chip blue" title="En el cliente es opcional: va en el pack por si acaso">OPCIONAL EN CLIENTE</span>':''}
         </div>
         <div class="player-meta" style="font-family:var(--mono)">${esc(m.versionNumber||m.filename)}</div>
       </div>
@@ -907,12 +909,7 @@ async function downloadJar(i, btn){
   }
   btn.disabled = false; btn.innerHTML = original;
 }
-function downloadFriendsZip(){
-  const enabled = (state.installedMods||[]).filter(m=>m.enabled);
-  if(!enabled.length){ toast('alert','No hay mods activos que empaquetar','warn'); return; }
-  triggerDownload(`/api/servers/${curServerId()}/mods/pack`, '');
-  toast('check',`Descargando el .zip con ${enabled.length} mods. Tus amigos lo descomprimen en su carpeta mods y listo.`,'ok');
-}
+function downloadFriendsZip(){ downloadFriendsPack('zip'); }
 function switchModTab(tab){
   state.modTab = tab;
   document.querySelectorAll('[data-modtab]').forEach(t=>t.classList.toggle('active',t.dataset.modtab===tab));

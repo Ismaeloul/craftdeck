@@ -221,11 +221,45 @@ async function uploadBackup(file){
     loadBackups();
   } catch(err){ prog.textContent=''; toast('alert', err.message, 'err'); }
 }
-function downloadFriendsMrpack(){
+function downloadFriendsMrpack(){ downloadFriendsPack('mrpack'); }
+
+/* pack de amigos: primero se enseña qué entra y qué se queda fuera (mods solo de servidor), luego se descarga */
+async function downloadFriendsPack(kind){
   const enabled = (state.installedMods||[]).filter(m=>m.enabled);
   if(!enabled.length){ toast('alert','No hay mods activos que empaquetar','warn'); return; }
-  triggerDownload(`/api/servers/${curServerId()}/mods/pack.mrpack`, '');
-  toast('check','Descargando el .mrpack. Tus amigos lo importan en Prism, Modrinth App o ATLauncher y les monta el cliente solo.','ok');
+  let p;
+  try { p = await API.get(`/servers/${curServerId()}/mods/pack/preview`); }
+  catch(err){ toast('alert', err.message, 'err'); return; }
+  if(!p.needed.length && !p.optional.length){ toast('alert', `Ninguno de los ${enabled.length} mods hace falta en el cliente: tus amigos entran sin instalar nada`, 'info'); return; }
+  const url = kind==='mrpack' ? `/api/servers/${curServerId()}/mods/pack.mrpack` : `/api/servers/${curServerId()}/mods/pack`;
+  showPackPreview(p, kind, url);
+}
+function showPackPreview(p, kind, url){
+  let ov = document.getElementById('packOverlay');
+  if(!ov){
+    document.body.insertAdjacentHTML('beforeend', `<div class="modal-overlay" id="packOverlay"><div class="modal" id="packModal"></div></div>`);
+    ov = document.getElementById('packOverlay');
+    ov.addEventListener('click', e=>{ if(e.target===ov) ov.classList.remove('open'); });
+  }
+  const list = (arr, cls) => arr.length ? `<div class="day-chips" style="margin-top:6px">${arr.map(n=>`<span class="day-chip ${cls}" style="cursor:default">${esc(n)}</span>`).join('')}</div>` : '';
+  document.getElementById('packModal').innerHTML = `
+    <h3 style="font-size:16px;font-weight:650;margin-bottom:4px;">Pack para tus amigos (${kind==='mrpack'?'.mrpack':'.zip'})</h3>
+    <p style="font-size:12.5px;color:var(--muted);margin-bottom:14px;">Según lo que Modrinth dice de cada mod: lo que hace falta para entrar, lo opcional y lo que es solo de servidor.</p>
+    <div class="mini-label" style="color:var(--accent)">Necesarios para entrar (${p.needed.length})</div>
+    ${p.needed.length ? list(p.needed,'on') : '<p class="ram-hint">Ninguno: con el loader instalado ya pueden entrar.</p>'}
+    ${p.deps.length?`<p class="ram-hint" style="margin-top:6px">Incluye ${p.deps.length} que entran por ser dependencia de otro mod (${esc(p.deps.join(', '))}).</p>`:''}
+    ${p.unknown.length?`<p class="ram-hint warn" style="margin-top:6px">${p.unknown.length} subido${p.unknown.length===1?'':'s'} a mano: no sé si hacen falta en cliente, así que van por si acaso (${esc(p.unknown.join(', '))}).</p>`:''}
+    <div class="mini-label" style="margin-top:14px;color:var(--info)">Opcionales, no hacen falta para entrar (${p.optional.length})</div>
+    ${p.optional.length ? list(p.optional,'') : '<p class="ram-hint">Ninguno.</p>'}
+    ${p.optional.length && kind==='mrpack' ? '<p class="ram-hint" style="margin-top:6px">En el .mrpack van marcados como opcionales: el launcher deja elegirlos.</p>' : ''}
+    <div class="mini-label" style="margin-top:14px;color:var(--violet)">Solo de servidor, se quedan fuera (${p.serverOnly.length})</div>
+    ${p.serverOnly.length ? list(p.serverOnly,'') : '<p class="ram-hint">Ninguno.</p>'}
+    <div style="display:flex;gap:9px;justify-content:flex-end;margin-top:18px;flex-wrap:wrap;">
+      ${p.optional.length && kind==='zip' ? `<button class="btn ghost" onclick="triggerDownload('${url}?all=1',''); document.getElementById('packOverlay').classList.remove('open')">Incluir también los opcionales</button>` : ''}
+      <button class="btn" onclick="document.getElementById('packOverlay').classList.remove('open')">Cancelar</button>
+      <button class="btn primary" ${!p.needed.length && kind==='zip' ? 'disabled' : ''} onclick="triggerDownload('${url}',''); document.getElementById('packOverlay').classList.remove('open'); toast('check','Descargando el pack${kind==='mrpack'?' · impórtalo en Prism, Modrinth App o ATLauncher':' · descomprímelo en la carpeta mods del cliente; dentro va un LEEME'}','ok')">${icon('download',14)} Descargar ${kind==='mrpack' ? '.mrpack' : `${p.needed.length} mods`}</button>
+    </div>`;
+  ov.classList.add('open');
 }
 
 /* ---------- Backups: horario ---------- */

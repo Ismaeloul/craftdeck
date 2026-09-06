@@ -4,7 +4,7 @@ import extractZip from 'extract-zip';
 import { CACHE_DIR } from './paths.js';
 import { fetchJson, download } from './util.js';
 import { Loader, ServerMeta, serverDir, updateServer, audit, contentDirName } from './store.js';
-import { ModrinthVersion, TrackedMod, readTracked, writeTracked, listMods, contentDir } from './mods.js';
+import { ModrinthVersion, TrackedMod, readTracked, writeTracked, contentDir, clientPack } from './mods.js';
 import { createZip } from './backups.js';
 
 const MODRINTH = 'https://api.modrinth.com/v2';
@@ -147,18 +147,22 @@ async function trackFromDownload(filename: string, url: string, size: number, ha
  * Prism, Modrinth App, ATLauncher… lo importan directamente.
  */
 export async function writeMrpack(meta: ServerMeta, dest: NodeJS.WritableStream): Promise<number> {
-  const mods = (await listMods(meta.id)).filter((m) => m.enabled);
+  // lo necesario para entrar va como «required»; los opcionales de cliente van marcados
+  // «optional» (el launcher deja elegirlos); los de solo servidor no van
+  const pack = await clientPack(meta.id);
   const dir = await contentDir(meta.id);
   const sub = contentDirName(meta.loader);
   const files: MrpackIndex['files'] = [];
   const overrides: string[] = [];
-  for (const m of mods) {
+  for (const m of [...pack.needed, ...pack.optional]) {
+    const optional = pack.optional.includes(m);
     if (m.tracked && m.url && m.sha1 && m.sha512 && m.size) {
       files.push({
         path: `${sub}/${m.filename}`, hashes: { sha1: m.sha1, sha512: m.sha512 },
-        env: { client: 'required', server: 'optional' }, downloads: [m.url], fileSize: m.size,
+        env: { client: optional ? 'optional' : 'required', server: m.serverSide === 'unsupported' ? 'unsupported' : 'optional' },
+        downloads: [m.url], fileSize: m.size,
       });
-    } else {
+    } else if (!optional) {
       overrides.push(m.filename);
     }
   }

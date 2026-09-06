@@ -32,7 +32,7 @@ import {
 import {
   readProperties, writeProperties, listEditableFiles, readEditableFile, writeEditableFile,
 } from './properties.js';
-import { listMods, installMod, removeMod, toggleMod, checkModUpdates, updateMod, enabledModJarPaths, migrateMods, addUploadedJar } from './mods.js';
+import { listMods, installMod, removeMod, toggleMod, checkModUpdates, updateMod, migrateMods, addUploadedJar, clientPack, contentDir } from './mods.js';
 import { createZip } from './backups.js';
 import { playerStats } from './stats.js';
 import { listCrashes, crashText } from './crashes.js';
@@ -526,15 +526,37 @@ app.post('/api/servers/:id/mods/:filename/toggle', asyncRoute(async (req, res) =
 app.get('/api/servers/:id/mods/pack', asyncRoute(async (req, res) => {
   const meta = await getServer(req.params.id!);
   if (!meta) { res.status(404).json({ error: 'Servidor no encontrado' }); return; }
-  const files = await enabledModJarPaths(meta.id);
-  if (!files.length) { res.status(400).json({ error: 'No hay mods activos que empaquetar' }); return; }
+  // por defecto solo lo que hace falta para entrar; ?all=1 mete también los opcionales de cliente
+  const pack = await clientPack(meta.id);
+  const chosen = req.query.all === '1' ? [...pack.needed, ...pack.optional] : pack.needed;
+  if (!chosen.length) { res.status(400).json({ error: 'No hay mods que tus amigos necesiten instalar' }); return; }
+  const dir = await contentDir(meta.id);
   res.attachment(`craftdeck-${meta.name.replace(/[^\w-]+/g, '_')}-mods.zip`);
   const archive = createZip();
   archive.on('error', (err) => res.destroy(err));
   archive.pipe(res);
-  for (const f of files) archive.file(f, { name: path.basename(f) });
+  for (const m of chosen) archive.file(path.join(dir, m.filename), { name: m.filename });
+  archive.append([
+    `Mods para jugar en «${meta.name}» (${meta.loader} ${meta.mcVersion})`,
+    '',
+    `1. Instala ${meta.loader === 'fabric' ? 'Fabric' : meta.loader === 'neoforge' ? 'NeoForge' : 'Forge'} para Minecraft ${meta.mcVersion} en tu launcher.`,
+    '2. Copia estos .jar en la carpeta mods de tu Minecraft (.minecraft/mods).',
+    '3. Arranca el juego con ese perfil y entra al servidor.',
+    '',
+    `Incluidos (${chosen.length}):`, ...chosen.map((m) => `  - ${m.name} (${m.filename})${pack.unknown.includes(m) ? '  [subido a mano: no sé si hace falta en cliente]' : pack.deps.includes(m) ? '  [dependencia de otro mod]' : pack.optional.includes(m) ? '  [opcional: no hace falta para entrar]' : ''}`),
+    ...(req.query.all === '1' || !pack.optional.length ? [] : ['', `Opcionales, no hacen falta para entrar (${pack.optional.length}):`, ...pack.optional.map((m) => `  - ${m.name}`)]),
+    ...(pack.serverOnly.length ? ['', `Solo de servidor, no sirven en tu PC (${pack.serverOnly.length}):`, ...pack.serverOnly.map((m) => `  - ${m.name}`)] : []),
+    '', 'Generado por CraftDeck.', '',
+  ].join('\n'), { name: 'LEEME.txt' });
   await archive.finalize();
-  await audit('download', `Exportó el pack de mods (${files.length} jars)`, 'info');
+  await audit('download', `Exportó el pack de mods para amigos (${chosen.length} jars, ${pack.serverOnly.length} solo de servidor fuera)`, 'info');
+}));
+
+// qué entra y qué se queda fuera del pack de amigos (para enseñarlo antes de descargar)
+app.get('/api/servers/:id/mods/pack/preview', asyncRoute(async (req, res) => {
+  const pack = await clientPack(req.params.id!);
+  const names = (l: typeof pack.needed) => l.map((m) => m.name);
+  res.json({ needed: names(pack.needed), optional: names(pack.optional), serverOnly: names(pack.serverOnly), unknown: names(pack.unknown), deps: names(pack.deps) });
 }));
 
 // pack de amigos en .mrpack: lo importan Prism, Modrinth App, ATLauncher…

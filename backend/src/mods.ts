@@ -32,7 +32,11 @@ export interface TrackedMod {
   size?: number;
   sha1?: string;
   sha512?: string;
+  // ¿lo necesita el cliente de los amigos? (Modrinth: required | optional | unsupported)
+  clientSide?: Side;
+  serverSide?: Side;
 }
+export type Side = 'required' | 'optional' | 'unsupported' | 'unknown';
 
 export interface InstalledMod extends Partial<TrackedMod> {
   filename: string;
@@ -92,12 +96,85 @@ async function bestVersion(project: string, loaders: string[], game: string): Pr
   return v;
 }
 
-function trackedFromVersion(ver: ModrinthVersion, file: ModrinthFile, proj: { title: string; slug: string }): TrackedMod {
+interface ProjectInfo { title: string; slug: string; client_side?: Side; server_side?: Side }
+function trackedFromVersion(ver: ModrinthVersion, file: ModrinthFile, proj: ProjectInfo): TrackedMod {
   return {
     filename: file.filename, projectId: ver.project_id, slug: proj.slug,
     name: proj.title, versionId: ver.id, versionNumber: ver.version_number,
     url: file.url, size: file.size, sha1: file.hashes?.sha1, sha512: file.hashes?.sha512,
+    clientSide: proj.client_side ?? 'unknown', serverSide: proj.server_side ?? 'unknown',
   };
+}
+
+/**
+ * Completa clientSide/serverSide en los mods gestionados que aún no lo tienen
+ * (instalados antes de la 0.6.1 o que vinieron de un modpack). Una sola consulta a Modrinth.
+ */
+export async function ensureSideInfo(id: string): Promise<TrackedMod[]> {
+  const tracked = await readTracked(id);
+  const missing = tracked.filter((m) => !m.clientSide || m.clientSide === 'unknown').filter((m) => m.projectId);
+  if (missing.length) {
+    try {
+      const ids = [...new Set(missing.map((m) => m.projectId))];
+      const projects = await fetchJson<(ProjectInfo & { id: string })[]>(`${MODRINTH}/projects?ids=${encodeURIComponent(JSON.stringify(ids))}`);
+      for (const m of missing) {
+        const p = projects.find((x) => x.id === m.projectId);
+        if (p) { m.clientSide = p.client_side ?? 'unknown'; m.serverSide = p.server_side ?? 'unknown'; if (!m.slug) m.slug = p.slug; }
+      }
+      await writeTracked(id, tracked);
+    } catch { /* sin red: se exporta con lo que hay */ }
+  }
+  return tracked;
+}
+
+export interface ClientPack {
+  needed: InstalledMod[];     // hay que instalarlos para entrar: «required» en cliente, sus dependencias y los de origen desconocido
+  optional: InstalledMod[];   // funcionan en cliente pero no hacen falta para entrar (rendimiento, utilidades)
+  serverOnly: InstalledMod[]; // «unsupported» en cliente: no sirven de nada en el PC de los amigos
+  unknown: InstalledMod[];    // subidos a mano o sin dato: van en «needed» por si acaso
+  deps: InstalledMod[];       // subconjunto de «needed» que entró solo por ser dependencia de otro
+}
+
+/**
+ * Qué mods activos necesita el cliente de los amigos. Modrinth marca cada proyecto como
+ * required / optional / unsupported en cliente; «optional» significa que se puede instalar
+ * pero NO hace falta para entrar (Lithium, Spark…). Las dependencias obligatorias de un
+ * mod necesario (Fabric API, Kotlin…) se arrastran aunque ellas mismas sean «optional».
+ */
+export async function clientPack(id: string): Promise<ClientPack> {
+  const tracked = await ensureSideInfo(id);
+  const mods = (await listMods(id)).filter((m) => m.enabled);
+  const out: ClientPack = { needed: [], optional: [], serverOnly: [], unknown: [], deps: [] };
+  const included = new Set<string>();
+  const add = (m: InstalledMod) => { if (!included.has(m.filename)) { included.add(m.filename); out.needed.push(m); } };
+
+  for (const m of mods) {
+    if (!m.tracked || !m.clientSide || m.clientSide === 'unknown') { out.unknown.push(m); add(m); }
+    else if (m.clientSide === 'required') add(m);
+  }
+  // dependencias obligatorias de los necesarios (recursivo, consultando la versión instalada)
+  const queue = out.needed.filter((m) => m.tracked && m.versionId).map((m) => m.versionId!);
+  const seenVersions = new Set<string>();
+  while (queue.length) {
+    const vid = queue.shift()!;
+    if (seenVersions.has(vid)) continue;
+    seenVersions.add(vid);
+    let ver: ModrinthVersion | null = null;
+    try { ver = await fetchJson<ModrinthVersion>(`${MODRINTH}/version/${encodeURIComponent(vid)}`); } catch { continue; }
+    for (const dep of ver.dependencies) {
+      if (dep.dependency_type !== 'required' || !dep.project_id) continue;
+      const t = tracked.find((x) => x.projectId === dep.project_id);
+      const m = t && mods.find((x) => x.filename === t.filename);
+      if (m && !included.has(m.filename)) { add(m); out.deps.push(m); if (m.versionId) queue.push(m.versionId); }
+    }
+    if (seenVersions.size > 60) break;
+  }
+  for (const m of mods) {
+    if (included.has(m.filename)) continue;
+    if (m.clientSide === 'unsupported') out.serverOnly.push(m);
+    else out.optional.push(m);
+  }
+  return out;
 }
 
 /** Instala un proyecto y sus dependencias requeridas. Devuelve los nombres instalados. */
@@ -118,7 +195,7 @@ export async function installMod(id: string, project: string): Promise<string[]>
     if (tracked.some((m) => m.projectId === ver.project_id)) continue; // ya instalado
     const file = ver.files.find((f) => f.primary) ?? ver.files[0];
     if (!file) throw new Error(`«${current}» no tiene archivo descargable`);
-    const proj = await fetchJson<{ title: string; slug: string }>(`${MODRINTH}/project/${ver.project_id}`);
+    const proj = await fetchJson<ProjectInfo>(`${MODRINTH}/project/${ver.project_id}`);
     await download(file.url, path.join(dir, file.filename));
     tracked.push(trackedFromVersion(ver, file, proj));
     installed.push(proj.title);
@@ -199,8 +276,8 @@ async function replaceWith(id: string, mod: TrackedMod, ver: ModrinthVersion): P
     await rm(path.join(dir, mod.filename), { force: true });
     await rm(path.join(dir, mod.filename + '.disabled'), { force: true });
   }
-  const slug = mod.slug;
-  Object.assign(mod, trackedFromVersion(ver, file, { title: mod.name, slug: slug ?? '' }), { slug });
+  const { slug, clientSide, serverSide } = mod;
+  Object.assign(mod, trackedFromVersion(ver, file, { title: mod.name, slug: slug ?? '' }), { slug, clientSide, serverSide });
 }
 
 export async function updateMod(id: string, filename: string): Promise<string> {
